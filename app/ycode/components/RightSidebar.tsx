@@ -19,7 +19,16 @@ import Icon from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Select, SelectLabel, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectLabel,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  SelectSeparator
+} from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 // 4. Internal components
@@ -35,6 +44,7 @@ import VideoSettings, { type VideoSettingsValue } from './VideoSettings';
 import AudioSettings, { type AudioSettingsValue } from './AudioSettings';
 import IconSettings, { type IconSettingsValue } from './IconSettings';
 import FormSettings from './FormSettings';
+import FilterSettings from './FilterSettings';
 import AlertSettings from './AlertSettings';
 import HTMLEmbedSettings from './HTMLEmbedSettings';
 import InputSettings from './InputSettings';
@@ -72,7 +82,8 @@ import { useLayerLocks } from '@/hooks/use-layer-locks';
 import { classesToDesign, mergeDesign, removeConflictsForClass, getRemovedPropertyClasses } from '@/lib/tailwind-class-mapper';
 import { cn } from '@/lib/utils';
 import { sanitizeHtmlId } from '@/lib/html-utils';
-import { isFieldVariable, getCollectionVariable, findParentCollectionLayer, isTextEditable, findLayerWithParent, resetBindingsOnCollectionSourceChange } from '@/lib/layer-utils';
+import { isFieldVariable, getCollectionVariable, findParentCollectionLayer, findAllParentCollectionLayers, isTextEditable, findLayerWithParent, resetBindingsOnCollectionSourceChange, isInputInsideFilter } from '@/lib/layer-utils';
+import { detachSpecificLayerFromComponent } from '@/lib/component-utils';
 import { convertContentToValue, parseValueToContent } from '@/lib/cms-variables-utils';
 import { createTextComponentVariableValue } from '@/lib/variable-utils';
 import { getRichTextValue } from '@/lib/tiptap-utils';
@@ -89,6 +100,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface RightSidebarProps {
   selectedLayerId: string | null;
@@ -175,6 +187,9 @@ const RightSidebar = React.memo(function RightSidebar({
   const clearActiveInteraction = useEditorStore((state) => state.clearActiveInteraction);
   const activeTextStyleKey = useEditorStore((state) => state.activeTextStyleKey);
   const showTextStyleControls = useEditorStore((state) => state.showTextStyleControls());
+  const startElementPicker = useEditorStore((state) => state.startElementPicker);
+  const stopElementPicker = useEditorStore((state) => state.stopElementPicker);
+  const isElementPickerActive = useEditorStore((state) => !!state.elementPicker?.active);
 
   // Check if text is being edited on canvas
   const isTextEditingOnCanvas = useCanvasTextEditorStore((state) => state.isEditing);
@@ -226,6 +241,9 @@ const RightSidebar = React.memo(function RightSidebar({
   const selectedLayer: Layer | null = useMemo(() => {
     return findLayerById(selectedLayerId);
   }, [selectedLayerId, findLayerById]);
+
+  const selectedLayerRef = useRef(selectedLayer);
+  selectedLayerRef.current = selectedLayer;
 
   // Get the layer whose interactions we're editing (different from selected layer during target selection)
   const interactionOwnerLayer: Layer | null = useMemo(() => {
@@ -396,7 +414,7 @@ const RightSidebar = React.memo(function RightSidebar({
     const containerTags = [
       'div', 'container', 'section', 'nav', 'main', 'aside',
       'header', 'footer', 'article', 'figure', 'figcaption',
-      'details', 'summary'
+      'details', 'summary', 'label'
     ];
     return containerTags.includes(layer.name || '') ||
            containerTags.includes(layer.settings?.tag || '');
@@ -851,6 +869,8 @@ const RightSidebar = React.memo(function RightSidebar({
           id: collectionId,
           sort_by: currentCollectionVariable?.sort_by,
           sort_order: currentCollectionVariable?.sort_order,
+          sort_by_inputLayerId: currentCollectionVariable?.sort_by_inputLayerId,
+          sort_order_inputLayerId: currentCollectionVariable?.sort_order_inputLayerId,
         } : { id: '', source_field_id: undefined, source_field_type: undefined }
       }
     });
@@ -877,25 +897,26 @@ const RightSidebar = React.memo(function RightSidebar({
     }, 0);
   };
 
-  // Handle sort by change
-  const handleSortByChange = (sortBy: string) => {
-    if (selectedLayerId && selectedLayer) {
-      const currentCollectionVariable = getCollectionVariable(selectedLayer);
-      if (currentCollectionVariable) {
-        handleLayerUpdate(selectedLayerId, {
-          variables: {
-            ...selectedLayer?.variables,
-            collection: {
-              ...currentCollectionVariable,
-              sort_by: sortBy,
-              // Reset sort_order to 'asc' when changing sort_by
-              sort_order: (sortBy !== 'none' && sortBy !== 'manual' && sortBy !== 'random') ? 'asc' : currentCollectionVariable.sort_order,
-            }
-          }
-        });
+  const SORT_INPUT_VALUE_OPTION = '__input_value__';
+  const sortByTriggerRef = useRef<HTMLButtonElement>(null);
+  const sortOrderTriggerRef = useRef<HTMLButtonElement>(null);
+
+  const handleSortByChange = useCallback((sortBy: string) => {
+    if (!selectedLayerId || !selectedLayer) return;
+    const currentCollectionVariable = getCollectionVariable(selectedLayer);
+    if (!currentCollectionVariable) return;
+    handleLayerUpdate(selectedLayerId, {
+      variables: {
+        ...selectedLayer.variables,
+        collection: {
+          ...currentCollectionVariable,
+          sort_by: sortBy,
+          sort_by_inputLayerId: undefined,
+          sort_order: (sortBy !== 'none' && sortBy !== 'manual' && sortBy !== 'random') ? 'asc' : currentCollectionVariable.sort_order,
+        }
       }
-    }
-  };
+    });
+  }, [selectedLayerId, selectedLayer, handleLayerUpdate]);
 
   // Handle reference field selection (for reference, multi-reference, or multi-asset as collection source)
   // Also resets child bindings when source changes
@@ -1010,6 +1031,8 @@ const RightSidebar = React.memo(function RightSidebar({
         source_field_type: undefined,
         sort_by: currentCollectionVariable?.sort_by,
         sort_order: currentCollectionVariable?.sort_order,
+        sort_by_inputLayerId: currentCollectionVariable?.sort_by_inputLayerId,
+        sort_order_inputLayerId: currentCollectionVariable?.sort_order_inputLayerId,
       };
     }
 
@@ -1061,22 +1084,96 @@ const RightSidebar = React.memo(function RightSidebar({
     return `collection:${collectionVariable.id}`;
   }, [selectedLayer]);
 
-  // Handle sort order change
-  const handleSortOrderChange = (sortOrder: 'asc' | 'desc') => {
-    if (selectedLayerId && selectedLayer) {
-      const currentCollectionVariable = getCollectionVariable(selectedLayer);
-      if (currentCollectionVariable) {
-        handleLayerUpdate(selectedLayerId, {
-          variables: {
-            ...selectedLayer?.variables,
-            collection: {
-              ...currentCollectionVariable,
-              sort_order: sortOrder,
-            }
-          }
-        });
+  const handleSortOrderChange = useCallback((sortOrder: 'asc' | 'desc') => {
+    if (!selectedLayerId || !selectedLayer) return;
+    const currentCollectionVariable = getCollectionVariable(selectedLayer);
+    if (!currentCollectionVariable) return;
+    handleLayerUpdate(selectedLayerId, {
+      variables: {
+        ...selectedLayer.variables,
+        collection: {
+          ...currentCollectionVariable,
+          sort_order: sortOrder,
+          sort_order_inputLayerId: undefined,
+        }
       }
+    });
+  }, [selectedLayerId, selectedLayer, handleLayerUpdate]);
+
+  const handlePickSortInput = useCallback((
+    key: 'sort_by_inputLayerId' | 'sort_order_inputLayerId',
+    origin?: { x: number; y: number },
+  ) => {
+    if (!selectedLayerId || !selectedLayer) return;
+    const currentCollectionVariable = getCollectionVariable(selectedLayer);
+    if (!currentCollectionVariable) return;
+
+    startElementPicker(
+      (layerId: string) => {
+        const freshLayer = selectedLayerRef.current;
+        if (!freshLayer) return;
+        const freshVariable = getCollectionVariable(freshLayer);
+        if (!freshVariable) return;
+        handleLayerUpdate(freshLayer.id, {
+          variables: {
+            ...freshLayer.variables,
+            collection: {
+              ...freshVariable,
+              [key]: layerId,
+              ...(key === 'sort_by_inputLayerId' ? { sort_by: 'none' } : {}),
+              ...(key === 'sort_order_inputLayerId' ? { sort_order: undefined } : {}),
+            },
+          },
+        });
+        stopElementPicker();
+      },
+      (layerId: string) => isInputInsideFilter(layerId, allLayers),
+      origin,
+    );
+  }, [selectedLayerId, selectedLayer, startElementPicker, stopElementPicker, allLayers, handleLayerUpdate]);
+
+  const handleSortBySelectValue = (value: string) => {
+    if (value === SORT_INPUT_VALUE_OPTION) {
+      const rect = sortByTriggerRef.current?.getBoundingClientRect();
+      const origin = rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : undefined;
+      handlePickSortInput('sort_by_inputLayerId', origin);
+      return;
     }
+    handleSortByChange(value);
+  };
+
+  const handleSortOrderSelectValue = (value: string) => {
+    if (value === SORT_INPUT_VALUE_OPTION) {
+      const rect = sortOrderTriggerRef.current?.getBoundingClientRect();
+      const origin = rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : undefined;
+      handlePickSortInput('sort_order_inputLayerId', origin);
+      return;
+    }
+    handleSortOrderChange(value as 'asc' | 'desc');
+  };
+
+  const getSortLinkedInputName = (inputLayerId: string): string => {
+    const inputLayer = findLayerById(inputLayerId);
+    if (!inputLayer) return `Unknown [${inputLayerId}]`;
+    const layerName = inputLayer.customName || inputLayer.name || 'Input';
+    return `${layerName} [${inputLayerId}]`;
+  };
+
+  const handleUnlinkSortInput = (key: 'sort_by_inputLayerId' | 'sort_order_inputLayerId') => {
+    if (!selectedLayerId || !selectedLayer) return;
+    const currentCollectionVariable = getCollectionVariable(selectedLayer);
+    if (!currentCollectionVariable) return;
+    handleLayerUpdate(selectedLayerId, {
+      variables: {
+        ...selectedLayer.variables,
+        collection: {
+          ...currentCollectionVariable,
+          [key]: undefined,
+          ...(key === 'sort_by_inputLayerId' ? { sort_by: 'none' } : {}),
+          ...(key === 'sort_order_inputLayerId' ? { sort_order: 'asc' } : {}),
+        },
+      },
+    });
   };
 
   // Handle limit change
@@ -1822,6 +1919,7 @@ const RightSidebar = React.memo(function RightSidebar({
                           <SelectItem value="figcaption">Figcaption</SelectItem>
                           <SelectItem value="details">Details</SelectItem>
                           <SelectItem value="summary">Summary</SelectItem>
+                          <SelectItem value="label">Label</SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -2213,59 +2311,105 @@ const RightSidebar = React.memo(function RightSidebar({
                     <>
                       <div className="grid grid-cols-3">
                         <Label variant="muted">Sort by</Label>
-                        <div className="col-span-2 *:w-full">
-                          <Select
-                            value={getCollectionVariable(selectedLayer)?.sort_by || 'none'}
-                            onValueChange={handleSortByChange}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select sorting" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                <SelectItem value="none">None</SelectItem>
-                                <SelectItem value="manual">Manual</SelectItem>
-                                <SelectItem value="random">Random</SelectItem>
-                              </SelectGroup>
-                              <SelectGroup>
-                                <SelectLabel>Fields</SelectLabel>
-                                {selectedCollectionFields.length > 0 &&
-                                  selectedCollectionFields.map((field) => (
-                                    <SelectItem key={field.id} value={field.id}>
-                                      <span className="flex items-center gap-2">
-                                        <Icon name={getFieldIcon(field.type)} className="size-3 text-muted-foreground shrink-0" />
-                                        {field.name}
-                                      </span>
-                                    </SelectItem>
-                                  ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
+                        <div className="col-span-2 *:w-full flex">
+                          {getCollectionVariable(selectedLayer)?.sort_by_inputLayerId ? (
+                              <div className="flex items-center gap-1">
+                                <Input value={getSortLinkedInputName(getCollectionVariable(selectedLayer)!.sort_by_inputLayerId!)} disabled />
+                                <div className="shrink-0">
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button variant="secondary" onClick={() => handleUnlinkSortInput('sort_by_inputLayerId')}>
+                                        <Icon name="x" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Unlink filter input</TooltipContent>
+                                  </Tooltip>
+                                </div>
+                              </div>
+                          ) : isElementPickerActive ? (
+                            <Button
+                              variant="secondary" onClick={stopElementPicker}
+                            />
+                          ) : (
+                            <Select
+                              value={getCollectionVariable(selectedLayer)?.sort_by || 'none'}
+                              onValueChange={handleSortBySelectValue}
+                            >
+                              <SelectTrigger ref={sortByTriggerRef}>
+                                <SelectValue placeholder="Select sorting" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  <SelectItem value="none">None</SelectItem>
+                                  <SelectItem value="manual">Manual</SelectItem>
+                                  <SelectItem value="random">Random</SelectItem>
+                                  <SelectItem value={SORT_INPUT_VALUE_OPTION}>Input value</SelectItem>
+                                </SelectGroup>
+                                <SelectSeparator />
+                                <SelectGroup>
+                                  <SelectLabel>Fields</SelectLabel>
+                                  {selectedCollectionFields.length > 0 &&
+                                    selectedCollectionFields.map((field) => (
+                                      <SelectItem key={field.id} value={field.id}>
+                                        <span className="flex items-center gap-2">
+                                          <Icon name={getFieldIcon(field.type)} className="size-3 text-muted-foreground shrink-0" />
+                                          {field.name}
+                                        </span>
+                                      </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                          )}
                         </div>
                       </div>
 
-                      {/* Sort Order - only show when a field is selected */}
-                      {getCollectionVariable(selectedLayer)?.sort_by &&
-                        getCollectionVariable(selectedLayer)?.sort_by !== 'none' &&
-                        getCollectionVariable(selectedLayer)?.sort_by !== 'manual' &&
-                        getCollectionVariable(selectedLayer)?.sort_by !== 'random' && (
+                      {/* Sort Order - show when field sort is selected or order is input-linked */}
+                      {(getCollectionVariable(selectedLayer)?.sort_order_inputLayerId ||
+                        getCollectionVariable(selectedLayer)?.sort_by_inputLayerId ||
+                        (getCollectionVariable(selectedLayer)?.sort_by &&
+                          getCollectionVariable(selectedLayer)?.sort_by !== 'none' &&
+                          getCollectionVariable(selectedLayer)?.sort_by !== 'manual' &&
+                          getCollectionVariable(selectedLayer)?.sort_by !== 'random')) && (
                           <div className="grid grid-cols-3">
                             <Label variant="muted">Sort order</Label>
-                            <div className="col-span-2 *:w-full">
-                              <Select
-                                value={getCollectionVariable(selectedLayer)?.sort_order || 'asc'}
-                                onValueChange={handleSortOrderChange}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectGroup>
-                                    <SelectItem value="asc">Ascending</SelectItem>
-                                    <SelectItem value="desc">Descending</SelectItem>
-                                  </SelectGroup>
-                                </SelectContent>
-                              </Select>
+                            <div className="col-span-2 *:w-full flex">
+                              {getCollectionVariable(selectedLayer)?.sort_order_inputLayerId ? (
+
+                                  <div className="flex items-center gap-1">
+                                    <Input value={getSortLinkedInputName(getCollectionVariable(selectedLayer)!.sort_order_inputLayerId!)} disabled />
+                                    <div className="shrink-0">
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button variant="secondary" onClick={() => handleUnlinkSortInput('sort_order_inputLayerId')}>
+                                            <Icon name="x" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Unlink filter input</TooltipContent>
+                                      </Tooltip>
+                                    </div>
+                                  </div>
+
+                              ) : isElementPickerActive ? (
+                                <Button variant="secondary" onClick={stopElementPicker} />
+                              ) : (
+                                <Select
+                                  value={getCollectionVariable(selectedLayer)?.sort_order || 'asc'}
+                                  onValueChange={handleSortOrderSelectValue}
+                                >
+                                  <SelectTrigger ref={sortOrderTriggerRef}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectGroup>
+                                      <SelectItem value="asc">Ascending</SelectItem>
+                                      <SelectItem value="desc">Descending</SelectItem>
+                                      <SelectSeparator />
+                                      <SelectItem value={SORT_INPUT_VALUE_OPTION}>Input value</SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                              )}
                             </div>
                           </div>
                       )}
@@ -2402,6 +2546,11 @@ const RightSidebar = React.memo(function RightSidebar({
             />
 
             <FormSettings
+              layer={selectedLayer}
+              onLayerUpdate={handleLayerUpdate}
+            />
+
+            <FilterSettings
               layer={selectedLayer}
               onLayerUpdate={handleLayerUpdate}
             />

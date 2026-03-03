@@ -4,18 +4,25 @@
  * PaginatedCollection Component
  *
  * Client component that handles pagination for collection layers.
- * Hydrates from SSR with initial items and supports client-side navigation.
+ * Hydrates from SSR with initial items and supports full-page navigation.
  * 
  * Features:
- * - URL-based pagination with layer-specific params (?p_LAYER_ID=N)
+ * - URL-based pagination with stripped layer ID params (?p_ID=N)
  * - Independent pagination for multiple collections on the same page
- * - Skeleton loading during page transitions
+ * - Loading state during page transitions
  * - Previous/Next button state management
+ *
+ * Navigation uses window.location.href (not router.push) so the proxy
+ * middleware can rewrite p_ params to the /dynamic route.
  */
 
-import React, { useState, useCallback, useTransition, useEffect } from 'react';
-import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useSearchParams, usePathname } from 'next/navigation';
 import type { CollectionPaginationMeta, Layer } from '@/types';
+
+function stripLayerPrefix(id: string): string {
+  return id.startsWith('lyr-') ? id.slice(4) : id;
+}
 
 interface PaginatedCollectionProps {
   children: React.ReactNode;
@@ -28,35 +35,29 @@ export default function PaginatedCollection({
   paginationMeta,
   collectionLayerId,
 }: PaginatedCollectionProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [isPending, startTransition] = useTransition();
+  const [isPending, setIsPending] = useState(false);
   
   const { currentPage, totalPages, totalItems, itemsPerPage } = paginationMeta;
 
-  // Handle page navigation - uses layer-specific URL param (p_LAYER_ID=N)
-  // This enables independent pagination for multiple collections on the same page
   const navigateToPage = useCallback((page: number) => {
     if (page < 1 || page > totalPages) return;
     
-    // Build new URL with layer-specific page param
     const params = new URLSearchParams(searchParams.toString());
-    const paramKey = `p_${collectionLayerId}`;
+    const paramKey = `p_${stripLayerPrefix(collectionLayerId)}`;
     
     if (page === 1) {
-      params.delete(paramKey); // Remove param for page 1 (cleaner URLs)
+      params.delete(paramKey);
     } else {
       params.set(paramKey, String(page));
     }
     
     const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
     
-    // Use transition for smooth loading state
-    startTransition(() => {
-      router.push(newUrl);
-    });
-  }, [router, pathname, searchParams, totalPages, collectionLayerId]);
+    setIsPending(true);
+    window.location.href = newUrl;
+  }, [pathname, searchParams, totalPages, collectionLayerId]);
 
   // Handle click events on pagination buttons (delegated)
   useEffect(() => {

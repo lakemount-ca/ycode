@@ -413,6 +413,55 @@ export async function getUnpublishedComponents(): Promise<Component[]> {
 }
 
 /**
+ * Hard-delete soft-deleted draft components and their published counterparts.
+ */
+export async function hardDeleteSoftDeletedComponents(): Promise<{ count: number }> {
+  const client = await getSupabaseAdmin();
+  if (!client) {
+    throw new Error('Failed to initialize Supabase client');
+  }
+
+  const { data: deletedDrafts, error } = await client
+    .from('components')
+    .select('id')
+    .eq('is_published', false)
+    .not('deleted_at', 'is', null);
+
+  if (error) {
+    throw new Error(`Failed to fetch deleted draft components: ${error.message}`);
+  }
+
+  if (!deletedDrafts || deletedDrafts.length === 0) {
+    return { count: 0 };
+  }
+
+  const ids = deletedDrafts.map(c => c.id);
+
+  const { error: pubError } = await client
+    .from('components')
+    .delete()
+    .in('id', ids)
+    .eq('is_published', true);
+
+  if (pubError) {
+    console.error('Failed to delete published components:', pubError);
+  }
+
+  const { error: draftError } = await client
+    .from('components')
+    .delete()
+    .in('id', ids)
+    .eq('is_published', false)
+    .not('deleted_at', 'is', null);
+
+  if (draftError) {
+    throw new Error(`Failed to delete draft components: ${draftError.message}`);
+  }
+
+  return { count: deletedDrafts.length };
+}
+
+/**
  * Get count of unpublished components
  */
 export async function getUnpublishedComponentsCount(): Promise<number> {

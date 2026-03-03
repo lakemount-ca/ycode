@@ -1,14 +1,14 @@
 import { NextRequest } from 'next/server';
 import { noCache } from '@/lib/api-response';
 import { publishPages } from '@/lib/services/pageService';
-import { publishCollectionWithItems, groupItemsByCollection } from '@/lib/services/collectionService';
+import { publishCollectionWithItems, groupItemsByCollection, cleanupDeletedCollections } from '@/lib/services/collectionService';
 import { publishLocalisation } from '@/lib/services/localisationService';
 import { publishFolders } from '@/lib/services/folderService';
 import { publishCSS, savePublishedAt } from '@/lib/services/settingsService';
 import { clearAllCache } from '@/lib/services/cacheService';
-import { getAllDraftPages } from '@/lib/repositories/pageRepository';
-import { publishComponents, getUnpublishedComponents } from '@/lib/repositories/componentRepository';
-import { publishLayerStyles, getUnpublishedLayerStyles } from '@/lib/repositories/layerStyleRepository';
+import { getAllDraftPages, hardDeleteSoftDeletedPages } from '@/lib/repositories/pageRepository';
+import { publishComponents, getUnpublishedComponents, hardDeleteSoftDeletedComponents } from '@/lib/repositories/componentRepository';
+import { publishLayerStyles, getUnpublishedLayerStyles, hardDeleteSoftDeletedLayerStyles } from '@/lib/repositories/layerStyleRepository';
 import { getAllCollections } from '@/lib/repositories/collectionRepository';
 import { getItemsByCollectionId } from '@/lib/repositories/collectionItemRepository';
 import { publishAssets, getUnpublishedAssets, hardDeleteSoftDeletedAssets } from '@/lib/repositories/assetRepository';
@@ -306,8 +306,34 @@ export async function POST(request: NextRequest) {
       stats.tables.layer_styles.durationMs = Math.round(performance.now() - stepStart);
     }
 
-    // Only publish assets, asset folders, and localization when doing a full publish
+    // Only clean up deletions and publish assets/localization when doing a full publish
     if (isPublishingAll) {
+      // Clean up soft-deleted pages, components, layer styles, and collections
+      // (propagate draft deletions to published versions)
+      try {
+        await hardDeleteSoftDeletedPages();
+      } catch {
+        // Non-fatal
+      }
+
+      try {
+        await hardDeleteSoftDeletedComponents();
+      } catch {
+        // Non-fatal
+      }
+
+      try {
+        await hardDeleteSoftDeletedLayerStyles();
+      } catch {
+        // Non-fatal
+      }
+
+      try {
+        await cleanupDeletedCollections();
+      } catch {
+        // Non-fatal
+      }
+
       // Asset folders
       {
         const stepStart = performance.now();

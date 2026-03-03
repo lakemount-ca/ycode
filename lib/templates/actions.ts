@@ -12,7 +12,7 @@ export const actionTemplates: Record<string, BlockTemplate> = {
     name: 'Button',
     template: {
       name: 'button',
-      classes: ['flex', 'flex-row', 'items-center', 'justify-center', 'text-[#FFFFFF]', 'pr-[16px]', 'pl-[16px]', 'pt-[8px]', 'pb-[8px]', 'text-[14px]', 'rounded-[12px]', 'bg-[#171717]'],
+      classes: ['flex', 'flex-row', 'items-center', 'justify-center', 'text-[#FFFFFF]', 'pr-[16px]', 'pl-[16px]', 'h-[38px]', 'text-[14px]', 'rounded-[12px]', 'bg-[#171717]'],
       children: [
         getTemplateRef('text', {
           settings: {
@@ -38,14 +38,12 @@ export const actionTemplates: Record<string, BlockTemplate> = {
         typography: {
           isActive: true,
           color: '#ffffff',
-          fontSize: '16px',
+          fontSize: '14px',
         },
         spacing: {
           isActive: true,
           paddingLeft: '16',
-          paddingRight: '16',
-          paddingTop: '8',
-          paddingBottom: '8'
+          paddingRight: '16',        
         },
         'backgrounds': {
           'backgroundColor': '#171717',

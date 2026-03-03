@@ -66,7 +66,7 @@ export function SelectionOverlay({
   ) => {
     if (!container) return;
 
-    if (!layerId) {
+    if (!layerId || layerId === 'body') {
       container.style.display = 'none';
       return;
     }

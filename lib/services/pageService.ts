@@ -114,16 +114,16 @@ export async function fixOrphanedPageSlugs(
 
   try {
     // Fetch all existing slugs once for duplicate checking
-    let slugQuery = knex('pages')
+    const slugQuery = knex('pages')
       .select('slug')
       .whereNotNull('slug')
       .whereNot('slug', '')
       .whereNull('deleted_at');
 
-    // Apply tenant scoping (no-op in opensource, active in cloud)
-    slugQuery = await addTenantFilter(knex, slugQuery, 'pages');
-
-    const existingSlugs = await slugQuery.then(rows => new Set(rows.map((r: { slug: string }) => r.slug)));
+    // Apply tenant scoping and execute query
+    // await resolves both the Promise and the thenable QueryBuilder, returning rows
+    const slugRows: Array<{ slug: string }> = await addTenantFilter(knex, slugQuery, 'pages');
+    const existingSlugs = new Set(slugRows.map(r => r.slug));
 
     // Generate unique slugs for all orphaned pages
     const updates: Array<{ id: string; slug: string }> = [];

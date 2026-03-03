@@ -10,6 +10,7 @@ import { getAllPages } from '@/lib/repositories/pageRepository';
 import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
 import { getItemWithValues } from '@/lib/repositories/collectionItemRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
+import { getClassesString } from '@/lib/layer-utils';
 import type { Layer, Component, Page, CollectionItemWithValues, CollectionField, Locale, PageFolder } from '@/types';
 
 /** Password protection context for 401 error pages */
@@ -45,28 +46,18 @@ interface PageRendererProps {
  * Note: This is a Server Component. Script/style tags are automatically
  * hoisted to <head> by Next.js during SSR, eliminating FOUC.
  */
-function normalizeRootLayers(layerTree: Layer[]): Layer[] {
-  if (!layerTree || layerTree.length === 0) {
-    return layerTree;
+/** Extract body layer from the tree and return its classes + children to render */
+function extractBodyLayer(layers: Layer[]): { bodyClasses: string; childLayers: Layer[] } {
+  const bodyLayer = layers.find(l => l.id === 'body');
+  if (!bodyLayer) {
+    return { bodyClasses: '', childLayers: layers };
   }
 
-  const [firstLayer, ...rest] = layerTree;
-
-  if (firstLayer?.id !== 'body') {
-    return layerTree;
-  }
-
-  return [
-    {
-      ...firstLayer,
-      name: 'div',
-      settings: {
-        ...firstLayer.settings,
-        tag: 'div',
-      },
-    },
-    ...rest,
-  ];
+  const otherLayers = layers.filter(l => l.id !== 'body');
+  return {
+    bodyClasses: getClassesString(bodyLayer),
+    childLayers: [...(bodyLayer.children || []), ...otherLayers],
+  };
 }
 
 export default async function PageRenderer({
@@ -194,8 +185,8 @@ export default async function PageRenderer({
     ? resolveCustomCodePlaceholders(rawPageCustomCodeBody, collectionItem, collectionFields)
     : rawPageCustomCodeBody;
 
-  const normalizedLayers = normalizeRootLayers(resolvedLayers);
-  const hasLayers = normalizedLayers.length > 0;
+  const { bodyClasses, childLayers } = extractBodyLayer(resolvedLayers);
+  const hasLayers = childLayers.length > 0;
 
   // Generate CSS for initial animation states to prevent flickering
   const { css: initialAnimationCSS, hiddenLayerInfo } = generateInitialAnimationCSS(resolvedLayers);
@@ -314,15 +305,25 @@ export default async function PageRenderer({
         <div dangerouslySetInnerHTML={{ __html: pageCustomCodeHead }} />
       )}
 
+      {/* Apply body layer classes to <body> synchronously before paint */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: (() => {
+            const classes = (bodyClasses || 'bg-white').split(/\s+/).filter(Boolean);
+            return `document.body.classList.add(${classes.map(c => JSON.stringify(c)).join(',')});`;
+          })(),
+        }}
+      />
+
       <div
         id="ybody"
-        className="h-full min-h-screen bg-white"
+        className="contents"
         data-layer-id="body"
         data-layer-type="div"
         data-is-empty={hasLayers ? 'false' : 'true'}
       >
         <LayerRenderer
-          layers={normalizedLayers}
+          layers={childLayers}
           isEditMode={false}
           isPublished={page.is_published}
           pageCollectionItemId={collectionItem?.id}

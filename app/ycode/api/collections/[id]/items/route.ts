@@ -38,9 +38,20 @@ export async function GET(
     const sortBy = searchParams.get('sortBy') || undefined;
     const sortOrder = (searchParams.get('sortOrder') || 'asc') as 'asc' | 'desc';
     const offsetParam = searchParams.get('offset');
+    const filtersParam = searchParams.get('filters');
 
     // Calculate offset (use explicit offset if provided, otherwise calculate from page)
     const offset = offsetParam ? parseInt(offsetParam, 10) : (page - 1) * limit;
+
+    // Parse dynamic filter conditions from query param
+    let dynamicFilters: Array<{ fieldId: string; operator: string; value: string }> = [];
+    if (filtersParam) {
+      try {
+        dynamicFilters = JSON.parse(filtersParam);
+      } catch {
+        // Ignore malformed filter param
+      }
+    }
 
     // When sorting by a field value, we must fetch ALL items first to sort globally,
     // then paginate the sorted result. Otherwise DB pagination order won't match.
@@ -62,6 +73,45 @@ export async function GET(
 
     // Enrich items with computed status values before sorting
     await enrichItemsWithStatus(items, id, statusFieldId);
+
+    // Apply dynamic filters from filter layer conditions
+    if (dynamicFilters.length > 0) {
+      items = items.filter(item => {
+        return dynamicFilters.every(filter => {
+          const fieldValue = String(item.values[filter.fieldId] ?? '').toLowerCase();
+          const filterValue = String(filter.value).toLowerCase();
+
+          switch (filter.operator) {
+            case 'contains':
+              return fieldValue.includes(filterValue);
+            case 'does_not_contain':
+              return !fieldValue.includes(filterValue);
+            case 'is':
+              return fieldValue === filterValue;
+            case 'is_not':
+              return fieldValue !== filterValue;
+            case 'starts_with':
+              return fieldValue.startsWith(filterValue);
+            case 'ends_with':
+              return fieldValue.endsWith(filterValue);
+            case 'is_empty':
+              return fieldValue === '';
+            case 'is_not_empty':
+              return fieldValue !== '';
+            case 'gt':
+              return parseFloat(fieldValue) > parseFloat(filterValue);
+            case 'gte':
+              return parseFloat(fieldValue) >= parseFloat(filterValue);
+            case 'lt':
+              return parseFloat(fieldValue) < parseFloat(filterValue);
+            case 'lte':
+              return parseFloat(fieldValue) <= parseFloat(filterValue);
+            default:
+              return fieldValue.includes(filterValue);
+          }
+        });
+      });
+    }
 
     // Apply sorting
     if (sortBy && sortBy !== 'none') {

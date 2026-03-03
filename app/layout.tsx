@@ -23,7 +23,7 @@ export default function RootLayout({
   // This avoids using headers() which would force all pages to be dynamic
   return (
     <html lang="en">
-      <body className={`${inter.variable} font-sans antialiased text-xs`}>
+      <body className={`${inter.variable} font-sans antialiased text-xs`} suppressHydrationWarning>
         <DarkModeProvider>
           {children}
         </DarkModeProvider>

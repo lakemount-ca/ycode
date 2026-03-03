@@ -30,6 +30,7 @@ import LayerContextMenu from '@/app/ycode/components/LayerContextMenu';
 import CanvasTextEditor from '@/app/ycode/components/CanvasTextEditor';
 import { useComponentsStore } from '@/stores/useComponentsStore';
 import { useCollectionLayerStore } from '@/stores/useCollectionLayerStore';
+import { useFilterStore } from '@/stores/useFilterStore';
 import { useCollectionsStore } from '@/stores/useCollectionsStore';
 import { useAssetsStore } from '@/stores/useAssetsStore';
 import { ShimmerSkeleton } from '@/components/ui/shimmer-skeleton';
@@ -37,6 +38,7 @@ import { combineBgValues, mergeStaticBgVars } from '@/lib/tailwind-class-mapper'
 import { clsx } from 'clsx';
 import PaginatedCollection from '@/components/PaginatedCollection';
 import LoadMoreCollection from '@/components/LoadMoreCollection';
+import FilterableCollection from '@/components/FilterableCollection';
 import LocaleSelector from '@/components/layers/LocaleSelector';
 import { usePagesStore } from '@/stores/usePagesStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
@@ -181,38 +183,63 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
     if (layer.name === '_fragment' && layer.children) {
       const renderedChildren = layer.children.map((child: Layer) => renderLayer(child));
 
-      // If this fragment has pagination metadata and we're in published mode,
-      // wrap it with the appropriate pagination component
-      if (layer._paginationMeta && isPublished) {
-        // Extract the original layer ID from the fragment ID (remove -fragment suffix)
-        const originalLayerId = layer.id.replace(/-fragment$/, '');
-        const paginationMode = layer._paginationMeta.mode || 'pages';
+      const originalLayerId = layer.id.replace(/-fragment$/, '');
+      const hasFilter = layer._filterConfig && !isEditMode;
+      const hasPagination = layer._paginationMeta && isPublished;
 
-        if (paginationMode === 'load_more') {
-          // Use LoadMoreCollection for "Load More" mode
-          return (
-            <Suspense key={layer.id} fallback={<div className="animate-pulse bg-gray-200 rounded h-32" />}>
+      if (hasPagination || hasFilter) {
+        let content: React.ReactNode = renderedChildren;
+
+        // Inner layer: pagination wraps the SSR items
+        if (hasPagination) {
+          const paginationMode = layer._paginationMeta!.mode || 'pages';
+
+          if (paginationMode === 'load_more') {
+            content = (
               <LoadMoreCollection
-                paginationMeta={layer._paginationMeta}
+                paginationMeta={layer._paginationMeta!}
                 collectionLayerId={originalLayerId}
-                itemIds={layer._paginationMeta.itemIds}
-                layerTemplate={layer._paginationMeta.layerTemplate}
+                itemIds={layer._paginationMeta!.itemIds}
+                layerTemplate={layer._paginationMeta!.layerTemplate}
               >
-                {renderedChildren}
+                {content}
               </LoadMoreCollection>
-            </Suspense>
+            );
+          } else {
+            content = (
+              <PaginatedCollection
+                paginationMeta={layer._paginationMeta!}
+                collectionLayerId={originalLayerId}
+              >
+                {content}
+              </PaginatedCollection>
+            );
+          }
+        }
+
+        // Outer layer: FilterableCollection swaps content when filters are active
+        if (hasFilter) {
+          content = (
+            <FilterableCollection
+              collectionId={layer._filterConfig!.collectionId}
+              collectionLayerId={layer._filterConfig!.collectionLayerId}
+              filters={layer._filterConfig!.filters}
+              sortBy={layer._filterConfig!.sortBy}
+              sortOrder={layer._filterConfig!.sortOrder}
+              sortByInputLayerId={layer._filterConfig!.sortByInputLayerId}
+              sortOrderInputLayerId={layer._filterConfig!.sortOrderInputLayerId}
+              limit={layer._filterConfig!.limit}
+              paginationMode={layer._filterConfig!.paginationMode}
+              layerTemplate={layer._filterConfig!.layerTemplate}
+            >
+              {content}
+            </FilterableCollection>
           );
         }
 
-        // Default: Use PaginatedCollection for "Pages" mode
         return (
           <Suspense key={layer.id} fallback={<div className="animate-pulse bg-gray-200 rounded h-32" />}>
-            <PaginatedCollection
-              paginationMeta={layer._paginationMeta}
-              collectionLayerId={originalLayerId}
-            >
-              {renderedChildren}
-            </PaginatedCollection>
+            {content}
           </Suspense>
         );
       }
@@ -557,6 +584,7 @@ const LayerItem: React.FC<{
 
   // Code Embed iframe ref and effect - must be at component level
   const htmlEmbedIframeRef = React.useRef<HTMLIFrameElement>(null);
+  const filterLayerRef = React.useRef<HTMLDivElement>(null);
   const htmlEmbedCode = layer.name === 'htmlEmbed'
     ? (layer.settings?.htmlEmbed?.code || '<div>Add your custom code here</div>')
     : '';
@@ -618,6 +646,147 @@ const LayerItem: React.FC<{
       clearInterval(interval);
     };
   }, [htmlEmbedCode, layer.name]);
+
+  // Filter layer runtime behavior: attach event listeners to child inputs
+  const isFilterLayer = layer.name === 'filter';
+  const filterOnChange = layer.settings?.filterOnChange ?? false;
+
+  // Load filter values from URL on initial render and populate input elements
+  React.useEffect(() => {
+    if (isEditMode || !isFilterLayer || !filterLayerRef.current) return;
+
+    const container = filterLayerRef.current;
+    const store = useFilterStore.getState();
+
+    // Build the name map from DOM: inputLayerId → name attribute (or stripped ID)
+    const nameMap: Record<string, string> = {};
+    const reverseMap: Record<string, string> = {};
+    const inputs = container.querySelectorAll('input, select, textarea');
+    inputs.forEach(el => {
+      const inputLayerId = (el as HTMLElement).closest('[data-layer-id]')?.getAttribute('data-layer-id');
+      if (!inputLayerId) return;
+      const nameAttr = (el as HTMLInputElement).getAttribute('name');
+      const paramName = nameAttr || (inputLayerId.startsWith('lyr-') ? inputLayerId.slice(4) : inputLayerId);
+      nameMap[inputLayerId] = paramName;
+      reverseMap[paramName] = inputLayerId;
+    });
+    const inputLayerIds = Object.keys(nameMap);
+    store.setNameMap(nameMap);
+
+    // Populate input elements with values from URL params
+    const url = new URL(window.location.href);
+    url.searchParams.forEach((value, key) => {
+      if (!value) return;
+      const inputLayerId = reverseMap[key]
+        || (key.startsWith('filter_') ? key.slice('filter_'.length) : null);
+      if (!inputLayerId) return;
+      // Find the input: it may be a descendant of a wrapper div OR the element itself
+      let inputEl = container.querySelector(`[data-layer-id="${inputLayerId}"] input, [data-layer-id="${inputLayerId}"] select, [data-layer-id="${inputLayerId}"] textarea`) as HTMLInputElement | null;
+      if (!inputEl) {
+        const directEl = container.querySelector(`input[data-layer-id="${inputLayerId}"], select[data-layer-id="${inputLayerId}"], textarea[data-layer-id="${inputLayerId}"]`) as HTMLInputElement | null;
+        inputEl = directEl;
+      }
+      if (!inputEl) return;
+      if (inputEl.type === 'checkbox') {
+        inputEl.checked = value === 'true';
+      } else {
+        inputEl.value = value;
+      }
+    });
+
+    // Defer loadFromUrl to ensure FilterableCollection has mounted and subscribed
+    setTimeout(() => store.loadFromUrl(), 0);
+
+    return () => {
+      const state = useFilterStore.getState();
+      state.removeNameMapEntries(inputLayerIds);
+    };
+  }, [isEditMode, isFilterLayer]);
+
+  React.useEffect(() => {
+    if (isEditMode || !isFilterLayer || !filterLayerRef.current) return;
+
+    const container = filterLayerRef.current;
+    const filterLayerId = layer.id;
+    const { setFilterValues } = useFilterStore.getState();
+
+    const collectInputValues = () => {
+      const nameMap: Record<string, string> = {};
+      const inputValues: Record<string, string> = {};
+      const inputs = container.querySelectorAll('input, select, textarea');
+      inputs.forEach(el => {
+        const inputEl = el as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+        const inputLayerId = inputEl.closest('[data-layer-id]')?.getAttribute('data-layer-id');
+        if (!inputLayerId) return;
+        const nameAttr = inputEl.getAttribute('name');
+        if (nameAttr) nameMap[inputLayerId] = nameAttr;
+        const value = inputEl.type === 'checkbox' ? (inputEl as HTMLInputElement).checked.toString() : inputEl.value;
+        inputValues[inputLayerId] = value;
+      });
+      setFilterValues(filterLayerId, inputValues);
+      if (Object.keys(nameMap).length > 0) {
+        useFilterStore.getState().setNameMap(nameMap);
+      }
+    };
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedCollect = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(collectInputValues, 750);
+    };
+
+    // Button click handler - always triggers collection
+    const handleButtonClick = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('button') || target.tagName === 'BUTTON') {
+        e.preventDefault();
+        collectInputValues();
+      }
+    };
+
+    // Enter key handler - triggers collection from any input
+    const handleKeyDown = (e: Event) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key !== 'Enter') return;
+      const target = ke.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'SELECT') {
+        ke.preventDefault();
+        collectInputValues();
+      }
+    };
+
+    container.addEventListener('click', handleButtonClick);
+    container.addEventListener('keydown', handleKeyDown);
+
+    // If filterOnChange is enabled, listen for input changes
+    if (filterOnChange) {
+      const handleInputChange = () => debouncedCollect();
+      container.addEventListener('input', handleInputChange);
+      container.addEventListener('change', handleInputChange);
+
+      // Apply initial input values (including defaults) on mount.
+      collectInputValues();
+
+      return () => {
+        container.removeEventListener('click', handleButtonClick);
+        container.removeEventListener('keydown', handleKeyDown);
+        container.removeEventListener('input', handleInputChange);
+        container.removeEventListener('change', handleInputChange);
+        useFilterStore.getState().clearFilter(filterLayerId);
+        if (debounceTimer) clearTimeout(debounceTimer);
+      };
+    }
+
+    // Apply initial input values (including defaults) on mount.
+    collectInputValues();
+
+    return () => {
+      container.removeEventListener('click', handleButtonClick);
+      container.removeEventListener('keydown', handleKeyDown);
+      useFilterStore.getState().clearFilter(filterLayerId);
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [isFilterLayer, filterOnChange, isEditMode, layer.id]);
 
   // Resolve text and image URLs with field binding support
   const textContent = (() => {
@@ -938,15 +1107,30 @@ const LayerItem: React.FC<{
     }
 
     // Apply collection filters (evaluate against each item's own values)
+    // In edit mode, skip conditions that have inputLayerId (dynamic filter inputs have no value at design time)
     const collectionFilters = collectionVariable?.filters;
     if (collectionFilters?.groups?.length) {
-      items = items.filter(item =>
-        evaluateVisibility(collectionFilters, {
-          collectionLayerData: item.values,
-          pageCollectionData: null,
-          pageCollectionCounts: {},
-        })
-      );
+      const effectiveFilters = isEditMode
+        ? {
+          ...collectionFilters,
+          groups: collectionFilters.groups
+            .map(group => ({
+              ...group,
+              conditions: group.conditions.filter(c => !c.inputLayerId),
+            }))
+            .filter(group => group.conditions.length > 0),
+        }
+        : collectionFilters;
+
+      if (effectiveFilters.groups.length > 0) {
+        items = items.filter(item =>
+          evaluateVisibility(effectiveFilters, {
+            collectionLayerData: item.values,
+            pageCollectionData: null,
+            pageCollectionCounts: {},
+          })
+        );
+      }
     }
 
     return items;
@@ -1276,8 +1460,15 @@ const LayerItem: React.FC<{
     const isLocked = layer.id === 'body';
 
     // Build props for the element
+    const combinedRef = isFilterLayer
+      ? (node: HTMLElement | null) => {
+        setNodeRef(node);
+        (filterLayerRef as React.MutableRefObject<HTMLDivElement | null>).current = node as HTMLDivElement | null;
+      }
+      : setNodeRef;
+
     const elementProps: Record<string, unknown> = {
-      ref: setNodeRef,
+      ref: combinedRef,
       className: fullClassName,
       style: mergedStyle,
       'data-layer-id': layer.id,
@@ -1352,6 +1543,16 @@ const LayerItem: React.FC<{
     if (isEditMode && !isEditing) {
       const originalOnClick = elementProps.onClick as ((e: React.MouseEvent) => void) | undefined;
       elementProps.onClick = (e: React.MouseEvent) => {
+        // Ignore keyboard-generated clicks (detail===0) when a text editor
+        // is active inside this element (e.g. Space on a <button> triggers
+        // native click activation which would steal focus from the editor)
+        if (e.detail === 0) {
+          const el = e.currentTarget as HTMLElement;
+          if (el?.querySelector?.('[contenteditable="true"]')) {
+            e.stopPropagation();
+            return;
+          }
+        }
         // Block click if locked by another user
         if (isLockedByOther) {
           e.stopPropagation();
@@ -1515,6 +1716,21 @@ const LayerItem: React.FC<{
     if (htmlTag === 'select') {
       if (isInsideForm && !elementProps.name) {
         elementProps.name = layer.settings?.id || layer.id;
+      }
+
+      // Keep select uncontrolled while still supporting default selection
+      // from layer attributes (e.g. collection-sourced default option).
+      if ('value' in elementProps) {
+        elementProps.defaultValue = elementProps.value;
+        delete elementProps.value;
+      }
+
+      if (isEditMode && layer.settings?.optionsSource?.collectionId) {
+        return (
+          <Tag {...elementProps}>
+            <option disabled value="">(Options from collection)</option>
+          </Tag>
+        );
       }
     }
 

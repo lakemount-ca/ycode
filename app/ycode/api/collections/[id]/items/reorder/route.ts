@@ -46,7 +46,7 @@ export async function POST(
       return noCache({ error: 'Supabase not configured' }, 500);
     }
     
-    // Update each item's manual_order
+    // Update manual_order on draft rows only so publish detects the change
     const updatePromises = updates.map(({ id, manual_order }) =>
       client
         .from('collection_items')
@@ -56,6 +56,7 @@ export async function POST(
         })
         .eq('id', id)
         .eq('collection_id', collectionId)
+        .eq('is_published', false)
     );
     
     const results = await Promise.all(updatePromises);

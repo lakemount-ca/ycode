@@ -165,6 +165,16 @@ export interface LayerSettings {
     code?: string; // Custom HTML code to embed
   };
   form?: FormSettings; // Form-specific settings (only for form layers)
+  filterOnChange?: boolean; // For filter layers: trigger filtering on every input change (debounced)
+  optionsSource?: {
+    collectionId: string;
+    defaultItemId?: string; // item ID to pre-select as default
+    sortFieldId?: string; // field ID to sort options by (undefined = manual/insertion order)
+    sortOrder?: 'asc' | 'desc'; // sort direction (defaults to 'asc')
+  };
+  selectOptionsMode?: 'list' | 'sort_by' | 'sort_order'; // Builder source mode for select options
+  sortByCollectionId?: string; // Collection to source sort-by field options from
+  sortByFieldIds?: string[]; // Which field IDs are enabled as sort-by options
 }
 
 // Layer Style Types
@@ -322,6 +332,19 @@ export interface Layer {
   _paginationMeta?: CollectionPaginationMeta;
   // SSR-only property for dynamic inline styles from CMS color field bindings
   _dynamicStyles?: Record<string, string>;
+  // SSR-only property for filterable collection config (when collection has linked filter inputs)
+  _filterConfig?: {
+    collectionId: string;
+    collectionLayerId: string;
+    filters: ConditionalVisibility;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+    sortByInputLayerId?: string;
+    sortOrderInputLayerId?: string;
+    limit?: number;
+    paginationMode?: 'pages' | 'load_more';
+    layerTemplate: Layer[];
+  };
 }
 
 export interface LayerVariables {
@@ -1088,6 +1111,8 @@ export interface CollectionVariable {
   id: string; // Collection ID
   sort_by?: 'none' | 'manual' | 'random' | string; // 'none', 'manual', 'random', or field ID
   sort_order?: 'asc' | 'desc'; // Only used when sort_by is a field ID
+  sort_by_inputLayerId?: string; // Linked filter input controlling sort_by at runtime
+  sort_order_inputLayerId?: string; // Linked filter input controlling sort_order at runtime
   limit?: number; // Maximum number of items to show (deprecated when pagination enabled)
   offset?: number; // Number of items to skip (deprecated when pagination enabled)
   source_field_id?: string; // Field ID from parent item (reference or multi-asset field)
@@ -1145,6 +1170,9 @@ export interface VisibilityCondition {
   collectionLayerName?: string; // Display name for the layer
   compareOperator?: 'eq' | 'lt' | 'lte' | 'gt' | 'gte'; // For 'item_count' operator
   compareValue?: number; // For 'item_count' operator
+  // For linking filter value to an input layer inside a Filter
+  inputLayerId?: string;
+  inputLayerId2?: string; // For second bound (e.g. 'is_between')
 }
 
 export interface VisibilityConditionGroup {

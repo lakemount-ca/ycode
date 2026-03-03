@@ -26,7 +26,7 @@ import { parseMultiAssetFieldValue, buildAssetVirtualValues } from '@/lib/multi-
 import { parseMultiReferenceValue } from '@/lib/collection-utils';
 import { combineBgValues, mergeStaticBgVars } from '@/lib/tailwind-class-mapper';
 import { getAssetsByIds } from '@/lib/repositories/assetRepository';
-import { isVirtualAssetField } from '@/lib/collection-field-utils';
+import { isVirtualAssetField, findDisplayField } from '@/lib/collection-field-utils';
 import type { FieldVariable, AssetVariable, DynamicTextVariable } from '@/types';
 import type { DesignColorVariable } from '@/types';
 
@@ -1685,16 +1685,28 @@ export async function resolveCollectionLayers(
           let items = fetchResult.items;
           const totalItems = fetchResult.total;
 
-          // Apply collection filters (evaluate against each item's own values)
+          // Apply static collection filters (evaluate against each item's own values)
+          // Dynamic filters (conditions with inputLayerId) are handled client-side
+          // by FilterableCollection, so we strip them here during SSR
           const collectionFilters = collectionVariable.filters;
           if (collectionFilters?.groups?.length) {
-            items = items.filter(item =>
-              evaluateVisibility(collectionFilters, {
-                collectionLayerData: item.values,
-                pageCollectionData: null,
-                pageCollectionCounts: {},
-              })
-            );
+            const staticFilters = {
+              ...collectionFilters,
+              groups: collectionFilters.groups.map(group => ({
+                ...group,
+                conditions: group.conditions.filter(c => !c.inputLayerId),
+              })).filter(group => group.conditions.length > 0),
+            };
+
+            if (staticFilters.groups.length > 0) {
+              items = items.filter(item =>
+                evaluateVisibility(staticFilters, {
+                  collectionLayerData: item.values,
+                  pageCollectionData: null,
+                  pageCollectionCounts: {},
+                })
+              );
+            }
           }
 
           // Apply sorting if specified (since API doesn't handle sortBy yet)
@@ -1814,6 +1826,15 @@ export async function resolveCollectionLayers(
           // Pagination is now a sibling layer, not added here
           const fragmentChildren = clonedLayers;
 
+          // Check if this collection has any runtime-linked controls (filters or sorting)
+          const hasLinkedFilters = !!(
+            collectionFilters?.groups?.some(g =>
+              g.conditions.some(c => !!c.inputLayerId || !!c.inputLayerId2)
+            ) ||
+            collectionVariable.sort_by_inputLayerId ||
+            collectionVariable.sort_order_inputLayerId
+          );
+
           // Return a fragment layer - LayerRenderer will render children directly without wrapper
           return {
             ...layer,
@@ -1829,6 +1850,19 @@ export async function resolveCollectionLayers(
             },
             // Store pagination meta for client hydration (SSR only)
             _paginationMeta: paginationMeta,
+            // Store filter config for client-side filtering (when collection has linked filter inputs)
+            _filterConfig: hasLinkedFilters ? {
+              collectionId: collectionVariable.id,
+              collectionLayerId: layer.id,
+              filters: collectionFilters || { groups: [] },
+              sortBy: collectionVariable.sort_by,
+              sortOrder: collectionVariable.sort_order,
+              sortByInputLayerId: collectionVariable.sort_by_inputLayerId,
+              sortOrderInputLayerId: collectionVariable.sort_order_inputLayerId,
+              limit: isPaginated ? paginationConfig.items_per_page : collectionVariable.limit,
+              paginationMode: isPaginated ? paginationConfig.mode : undefined,
+              layerTemplate: layer.children || [],
+            } : undefined,
           };
         } catch (error) {
           console.error(`Failed to resolve collection layer ${layer.id}:`, error);
@@ -1837,6 +1871,67 @@ export async function resolveCollectionLayers(
             children: layer.children ? await Promise.all(layer.children.map(child => resolveLayer(child, itemValues, layerDataMap))) : undefined,
           };
         }
+      }
+    }
+
+    // Collection-sourced select: replace children with options from a collection
+    if (layer.name === 'select' && layer.settings?.optionsSource?.collectionId) {
+      try {
+        const sourceCollectionId = layer.settings.optionsSource.collectionId;
+        let { items: sourceItems } = await getItemsWithValues(sourceCollectionId, isPublished);
+        const sourceFields = await getFieldsByCollectionId(sourceCollectionId, isPublished);
+        const opts = layer.settings.optionsSource;
+
+        const displayField = findDisplayField(sourceFields);
+
+        if (opts.sortFieldId) {
+          const sortField = sourceFields.find(f => f.id === opts.sortFieldId);
+          if (sortField) {
+            const dir = opts.sortOrder === 'desc' ? -1 : 1;
+            sourceItems = [...sourceItems].sort((a, b) => {
+              const aVal = String(a.values[sortField.id] ?? '');
+              const bVal = String(b.values[sortField.id] ?? '');
+              return aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' }) * dir;
+            });
+          }
+        }
+
+        const defaultItemId = opts.defaultItemId;
+        const hasDefault = !!(defaultItemId && sourceItems.some(i => i.id === defaultItemId));
+
+        const placeholderOption: Layer = {
+          id: `${layer.id}-opt-placeholder`,
+          name: 'option',
+          classes: '',
+          attributes: { value: '' },
+          variables: {
+            text: { type: 'dynamic_text' as const, data: { content: 'Select...' } },
+          },
+        };
+
+        const generatedOptions: Layer[] = sourceItems.map(item => {
+          const label = displayField ? (item.values[displayField.id] || 'Untitled') : 'Untitled';
+          return {
+            id: `${layer.id}-opt-${item.id}`,
+            name: 'option',
+            classes: '',
+            attributes: { value: item.id },
+            variables: {
+              text: { type: 'dynamic_text' as const, data: { content: String(label) } },
+            },
+          };
+        });
+
+        return {
+          ...layer,
+          attributes: {
+            ...(layer.attributes || {}),
+            ...(hasDefault ? { value: defaultItemId } : {}),
+          },
+          children: [placeholderOption, ...generatedOptions],
+        };
+      } catch (error) {
+        console.error(`Failed to resolve collection-sourced select options for layer ${layer.id}:`, error);
       }
     }
 
@@ -1932,6 +2027,54 @@ function computeCollectionCounts(layers: Layer[]): Record<string, number> {
 }
 
 /**
+ * Find collection layer IDs that have linked filters (_filterConfig).
+ * These need special handling for conditional visibility (has_no_items etc.)
+ * since filtered counts change at runtime.
+ */
+function findFilterableCollectionIds(layers: Layer[]): Set<string> {
+  const ids = new Set<string>();
+  function traverse(layerList: Layer[]) {
+    for (const layer of layerList) {
+      if (layer._filterConfig) {
+        ids.add(layer._filterConfig.collectionLayerId);
+      }
+      if (layer.children) traverse(layer.children);
+    }
+  }
+  traverse(layers);
+  return ids;
+}
+
+/**
+ * Check if a layer's conditional visibility references a filterable collection
+ * via page_collection conditions (has_no_items, has_items, item_count).
+ * Returns the collection layer ID if found, null otherwise.
+ */
+function getFilterableCollectionTarget(
+  conditionalVisibility: import('@/types').ConditionalVisibility,
+  filterableIds: Set<string>
+): { collectionLayerId: string; operator: string; compareOperator?: string; compareValue?: number } | null {
+  for (const group of conditionalVisibility.groups || []) {
+    for (const condition of group.conditions) {
+      if (
+        condition.source === 'page_collection' &&
+        condition.collectionLayerId &&
+        filterableIds.has(condition.collectionLayerId) &&
+        (condition.operator === 'has_no_items' || condition.operator === 'has_items' || condition.operator === 'item_count')
+      ) {
+        return {
+          collectionLayerId: condition.collectionLayerId,
+          operator: condition.operator,
+          compareOperator: condition.compareOperator,
+          compareValue: condition.compareValue,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Filter layers by conditional visibility rules
  * @param layers - Layer tree to filter
  * @param collectionLayerData - Current collection layer item values for field conditions
@@ -1943,18 +2086,15 @@ function filterByVisibility(
   collectionLayerData?: Record<string, string>,
   pageCollectionData?: Record<string, string> | null
 ): Layer[] {
-  // First compute all collection counts
   const pageCollectionCounts = computeCollectionCounts(layers);
+  const filterableCollectionIds = findFilterableCollectionIds(layers);
 
   function filterLayer(
     layer: Layer,
     currentCollectionLayerData?: Record<string, string>
   ): Layer | null {
-    // Use stored item values from cloned collection layers if available
-    // This ensures children of collection items have access to the correct item values
     const effectiveCollectionLayerData = layer._collectionItemValues || currentCollectionLayerData;
 
-    // Check conditional visibility
     const conditionalVisibility = layer.variables?.conditionalVisibility;
     if (conditionalVisibility && conditionalVisibility.groups?.length > 0) {
       const isVisible = evaluateVisibility(conditionalVisibility, {
@@ -1962,12 +2102,39 @@ function filterByVisibility(
         pageCollectionData,
         pageCollectionCounts,
       });
+      const filterTarget = getFilterableCollectionTarget(conditionalVisibility, filterableCollectionIds);
+      if (filterTarget) {
+        const attributes: Record<string, any> = {
+          ...(layer.attributes || {}),
+        };
+        if (filterTarget.operator === 'has_no_items') {
+          attributes['data-collection-empty-state'] = filterTarget.collectionLayerId;
+        } else if (filterTarget.operator === 'has_items') {
+          attributes['data-collection-has-items'] = filterTarget.collectionLayerId;
+        } else if (filterTarget.operator === 'item_count') {
+          attributes['data-collection-item-count'] = filterTarget.collectionLayerId;
+          attributes['data-collection-item-count-op'] = filterTarget.compareOperator || 'eq';
+          attributes['data-collection-item-count-value'] = String(filterTarget.compareValue ?? 0);
+        }
+        return {
+          ...layer,
+          _dynamicStyles: {
+            ...(layer._dynamicStyles || {}),
+            display: isVisible ? '' : 'none',
+          },
+          attributes,
+          children: layer.children
+            ? layer.children
+              .map(child => filterLayer(child, effectiveCollectionLayerData))
+              .filter((child): child is Layer => child !== null)
+            : undefined,
+        };
+      }
       if (!isVisible) {
         return null;
       }
     }
 
-    // Recursively filter children, passing down the effective item values
     if (layer.children) {
       const filteredChildren = layer.children
         .map(child => filterLayer(child, effectiveCollectionLayerData))
@@ -2298,9 +2465,35 @@ async function injectCollectionDataForHtml(
 
   const updates: Partial<Layer> = {};
 
-  // Resolve inline variables (DynamicTextVariable format)
+  // Resolve inline variables in text content
   const textVariable = layer.variables?.text;
-  if (textVariable && textVariable.type === 'dynamic_text') {
+
+  // Handle DynamicRichTextVariable (Tiptap JSON with dynamicVariable nodes)
+  if (textVariable && textVariable.type === 'dynamic_rich_text') {
+    const content = textVariable.data.content;
+    if (content && typeof content === 'object') {
+      const restrictiveBlockTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button'];
+      const currentTag = layer.settings?.tag || layer.name || 'div';
+      if (restrictiveBlockTags.includes(currentTag) &&
+          hasBlockElementsInInlineVariables(content, enhancedValues)) {
+        updates.settings = {
+          ...layer.settings,
+          tag: 'div',
+        };
+      }
+
+      const resolvedContent = resolveRichTextVariables(content, enhancedValues);
+      updates.variables = {
+        ...layer.variables,
+        text: {
+          type: 'dynamic_rich_text',
+          data: { content: resolvedContent }
+        }
+      };
+    }
+  }
+  // Handle DynamicTextVariable (legacy string format with inline variable tags)
+  else if (textVariable && textVariable.type === 'dynamic_text') {
     const textContent = textVariable.data.content;
     if (textContent.includes('<ycode-inline-variable>')) {
       const mockItem: CollectionItemWithValues = {
@@ -2795,6 +2988,14 @@ function layerToHtml(
 
   if (layer.id) {
     attrs.push(`data-layer-id="${escapeHtml(layer.id)}"`);
+  }
+
+  // Render filter-dependent conditional visibility data attributes
+  if (layer.attributes?.['data-collection-empty-state']) {
+    attrs.push(`data-collection-empty-state="${escapeHtml(layer.attributes['data-collection-empty-state'])}"`);
+  }
+  if (layer.attributes?.['data-collection-has-items']) {
+    attrs.push(`data-collection-has-items="${escapeHtml(layer.attributes['data-collection-has-items'])}"`);
   }
 
   if (classesStr) {

@@ -48,7 +48,10 @@ import {
   getItemDisplayName,
   COMPARE_OPERATORS,
 } from '@/lib/collection-field-utils';
-import { getCollectionVariable } from '@/lib/layer-utils';
+import { getCollectionVariable, isInputInsideFilter, findLayerById } from '@/lib/layer-utils';
+import { useEditorStore } from '@/stores/useEditorStore';
+import { usePagesStore } from '@/stores/usePagesStore';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CollectionItemWithValues } from '@/types';
 
 interface CollectionFiltersSettingsProps {
@@ -205,6 +208,17 @@ export default function CollectionFiltersSettings({
   const { fields: allFields, loadFields } = useCollectionsStore();
   const fields = allFields[collectionId] || [];
 
+  // Element picker and layer access for filter input linking
+  const startElementPicker = useEditorStore((state) => state.startElementPicker);
+  const stopElementPicker = useEditorStore((state) => state.stopElementPicker);
+  const currentPageId = useEditorStore((state) => state.currentPageId);
+  const draftsByPageId = usePagesStore((state) => state.draftsByPageId);
+  const allLayers = useMemo(() => {
+    if (!currentPageId) return [];
+    const draft = draftsByPageId[currentPageId];
+    return draft ? draft.layers : [];
+  }, [currentPageId, draftsByPageId]);
+
   // Load fields if not already loaded
   useEffect(() => {
     if (collectionId && fields.length === 0) {
@@ -339,104 +353,52 @@ export default function CollectionFiltersSettings({
     updateGroups(newGroups);
   };
 
-  // Handle operator change
+  const patchCondition = (
+    groupId: string,
+    conditionId: string,
+    patch: Partial<VisibilityCondition>,
+    debounced = false,
+  ) => {
+    const newGroups = groups.map(group => {
+      if (group.id !== groupId) return group;
+      return {
+        ...group,
+        conditions: group.conditions.map(c =>
+          c.id === conditionId ? { ...c, ...patch } : c
+        ),
+      };
+    });
+    if (debounced) {
+      debouncedUpdateGroups(newGroups);
+    } else {
+      updateGroups(newGroups);
+    }
+  };
+
   const handleOperatorChange = (groupId: string, conditionId: string, operator: VisibilityOperator) => {
-    const newGroups = groups.map(group => {
-      if (group.id === groupId) {
-        return {
-          ...group,
-          conditions: group.conditions.map(c => {
-            if (c.id === conditionId) {
-              return {
-                ...c,
-                operator,
-                value: operatorRequiresValue(operator) ? c.value : undefined,
-                value2: operatorRequiresSecondValue(operator) ? c.value2 : undefined,
-              };
-            }
-            return c;
-          }),
-        };
-      }
-      return group;
+    const needsSecondValue = operatorRequiresSecondValue(operator);
+    patchCondition(groupId, conditionId, {
+      operator,
+      value: operatorRequiresValue(operator) ? groups.find(g => g.id === groupId)?.conditions.find(c => c.id === conditionId)?.value : undefined,
+      value2: needsSecondValue ? groups.find(g => g.id === groupId)?.conditions.find(c => c.id === conditionId)?.value2 : undefined,
+      inputLayerId2: needsSecondValue ? groups.find(g => g.id === groupId)?.conditions.find(c => c.id === conditionId)?.inputLayerId2 : undefined,
     });
-    updateGroups(newGroups);
   };
 
-  // Handle value change (debounced for text inputs)
   const handleValueChange = (groupId: string, conditionId: string, value: string) => {
-    const newGroups = groups.map(group => {
-      if (group.id === groupId) {
-        return {
-          ...group,
-          conditions: group.conditions.map(c => {
-            if (c.id === conditionId) {
-              return { ...c, value };
-            }
-            return c;
-          }),
-        };
-      }
-      return group;
-    });
-    debouncedUpdateGroups(newGroups);
+    patchCondition(groupId, conditionId, { value }, true);
   };
 
-  // Handle second value change (for date between - debounced)
   const handleValue2Change = (groupId: string, conditionId: string, value2: string) => {
-    const newGroups = groups.map(group => {
-      if (group.id === groupId) {
-        return {
-          ...group,
-          conditions: group.conditions.map(c => {
-            if (c.id === conditionId) {
-              return { ...c, value2 };
-            }
-            return c;
-          }),
-        };
-      }
-      return group;
-    });
-    debouncedUpdateGroups(newGroups);
+    patchCondition(groupId, conditionId, { value2 }, true);
   };
 
-  // Handle compare operator change (for item count)
   const handleCompareOperatorChange = (groupId: string, conditionId: string, compareOperator: 'eq' | 'lt' | 'lte' | 'gt' | 'gte') => {
-    const newGroups = groups.map(group => {
-      if (group.id === groupId) {
-        return {
-          ...group,
-          conditions: group.conditions.map(c => {
-            if (c.id === conditionId) {
-              return { ...c, compareOperator };
-            }
-            return c;
-          }),
-        };
-      }
-      return group;
-    });
-    updateGroups(newGroups);
+    patchCondition(groupId, conditionId, { compareOperator });
   };
 
-  // Handle compare value change (for item count - debounced)
   const handleCompareValueChange = (groupId: string, conditionId: string, compareValue: number) => {
-    const newGroups = groups.map(group => {
-      if (group.id === groupId) {
-        return {
-          ...group,
-          conditions: group.conditions.map(c => {
-            if (c.id === conditionId) {
-              return { ...c, compareValue };
-            }
-            return c;
-          }),
-        };
-      }
-      return group;
-    });
-    debouncedUpdateGroups(newGroups);
+    patchCondition(groupId, conditionId, { compareValue }, true);
   };
 
   // Get field name by ID
@@ -449,6 +411,44 @@ export default function CollectionFiltersSettings({
   const getFieldType = (fieldId: string): CollectionFieldType | undefined => {
     const field = fields?.find(f => f.id === fieldId);
     return field?.type;
+  };
+
+  const handlePickInputForCondition = (groupId: string, conditionId: string, origin?: { x: number; y: number }) => {
+    startElementPicker(
+      (layerId: string) => {
+        patchCondition(groupId, conditionId, { inputLayerId: layerId, value: undefined });
+        stopElementPicker();
+      },
+      (layerId: string) => isInputInsideFilter(layerId, allLayers),
+      origin
+    );
+  };
+
+  const handlePickSecondInputForCondition = (groupId: string, conditionId: string, origin?: { x: number; y: number }) => {
+    startElementPicker(
+      (layerId: string) => {
+        patchCondition(groupId, conditionId, { inputLayerId2: layerId, value2: undefined });
+        stopElementPicker();
+      },
+      (layerId: string) => isInputInsideFilter(layerId, allLayers),
+      origin
+    );
+  };
+
+  const handleUnlinkInput = (groupId: string, conditionId: string) => {
+    patchCondition(groupId, conditionId, { inputLayerId: undefined });
+  };
+
+  const handleUnlinkSecondInput = (groupId: string, conditionId: string) => {
+    patchCondition(groupId, conditionId, { inputLayerId2: undefined });
+  };
+
+  // Get linked input display name
+  const getLinkedInputName = (inputLayerId: string): string => {
+    const inputLayer = findLayerById(allLayers, inputLayerId);
+    if (!inputLayer) return `Unknown input [${inputLayerId}]`;
+    const layerName = inputLayer.customName || inputLayer.name || 'Input';
+    return `${layerName} [${inputLayerId}]`;
   };
 
   // Render the dropdown content for adding conditions
@@ -581,62 +581,180 @@ export default function CollectionFiltersSettings({
             </div>
           )}
 
-          {/* Reference/Multi-reference items selector */}
+          {/* Reference/Multi-reference items selector (with element picker support) */}
           {operatorRequiresItemSelection(condition.operator) && referenceCollectionId && (
-            <ReferenceItemsSelector
-              collectionId={referenceCollectionId}
-              value={condition.value || '[]'}
-              onChange={(value) => handleValueChange(group.id, condition.id, value)}
-            />
+            <>
+              {condition.inputLayerId ? (
+                <div className="flex items-center gap-1">
+                  <Input value={getLinkedInputName(condition.inputLayerId)} disabled />
+                  <div className="shrink-0">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="secondary" onClick={() => handleUnlinkInput(group.id, condition.id)}>
+                          <Icon name="x" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Unlink filter input</TooltipContent>
+                    </Tooltip>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <div className="flex-1">
+                    <ReferenceItemsSelector
+                      collectionId={referenceCollectionId}
+                      value={condition.value || '[]'}
+                      onChange={(value) => handleValueChange(group.id, condition.id, value)}
+                    />
+                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="secondary"
+                        onClick={(e) => {
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          handlePickInputForCondition(group.id, condition.id, {
+                            x: rect.left + rect.width / 2,
+                            y: rect.top + rect.height / 2,
+                          });
+                        }}
+                      >
+                        <Icon name="crosshair" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Link to filter input</TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
+            </>
           )}
 
           {operatorRequiresValue(condition.operator) && condition.operator !== 'item_count' && !operatorRequiresItemSelection(condition.operator) && (
             <>
-              {fieldType === 'boolean' ? (
-                <Select
-                  value={condition.value || 'true'}
-                  onValueChange={(value) => handleValueChange(group.id, condition.id, value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="true">True</SelectItem>
-                      <SelectItem value="false">False</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              ) : fieldType === 'date' ? (
-                <Input
-                  type="date"
-                  value={condition.value || ''}
-                  onChange={(e) => handleValueChange(group.id, condition.id, e.target.value)}
-                />
-              ) : fieldType === 'number' ? (
-                <Input
-                  type="number"
-                  placeholder="Enter value..."
-                  value={condition.value || ''}
-                  onChange={(e) => handleValueChange(group.id, condition.id, e.target.value)}
-                />
+              {condition.inputLayerId ? (
+                <div className="flex items-center gap-1">
+                  <Input
+                    value={getLinkedInputName(condition.inputLayerId)}
+                    disabled
+                  />
+                  <div className="shrink-0">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="secondary" onClick={() => handleUnlinkInput(group.id, condition.id)}>
+                          <Icon name="x" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Unlink filter input</TooltipContent>
+                    </Tooltip>
+                  </div>
+                </div>
               ) : (
-                <Input
-                  placeholder="Enter value..."
-                  value={condition.value || ''}
-                  onChange={(e) => handleValueChange(group.id, condition.id, e.target.value)}
-                />
+                <div className="flex items-center gap-1">
+                  <div className="flex-1">
+                    {fieldType === 'boolean' ? (
+                      <Select
+                        value={condition.value || 'true'}
+                        onValueChange={(value) => handleValueChange(group.id, condition.id, value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="true">True</SelectItem>
+                            <SelectItem value="false">False</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    ) : fieldType === 'date' ? (
+                      <Input
+                        type="date"
+                        value={condition.value || ''}
+                        onChange={(e) => handleValueChange(group.id, condition.id, e.target.value)}
+                      />
+                    ) : fieldType === 'number' ? (
+                      <Input
+                        type="number"
+                        placeholder="Enter value..."
+                        value={condition.value || ''}
+                        onChange={(e) => handleValueChange(group.id, condition.id, e.target.value)}
+                      />
+                    ) : (
+                      <Input
+                        placeholder="Enter value..."
+                        value={condition.value || ''}
+                        onChange={(e) => handleValueChange(group.id, condition.id, e.target.value)}
+                      />
+                    )}
+                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="secondary"
+                        onClick={(e) => {
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          handlePickInputForCondition(group.id, condition.id, {
+                            x: rect.left + rect.width / 2,
+                            y: rect.top + rect.height / 2,
+                          });
+                        }}
+                      >
+                        <Icon name="crosshair" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Link to filter input</TooltipContent>
+                  </Tooltip>
+                </div>
               )}
 
               {/* Second value for date between */}
               {operatorRequiresSecondValue(condition.operator) && (
                 <>
                   <Label variant="muted" className="text-[10px] text-center">and</Label>
-                  <Input
-                    type="date"
-                    value={condition.value2 || ''}
-                    onChange={(e) => handleValue2Change(group.id, condition.id, e.target.value)}
-                  />
+                  {condition.inputLayerId2 ? (
+                    <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-xs">
+                      <Icon name="filter" className="size-3 text-muted-foreground shrink-0" />
+                      <span className="truncate text-foreground">{getLinkedInputName(condition.inputLayerId2)}</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+                            onClick={() => handleUnlinkSecondInput(group.id, condition.id)}
+                          >
+                            <Icon name="unlink" className="size-3" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Unlink second filter input</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <div className="flex-1">
+                        <Input
+                          type="date"
+                          value={condition.value2 || ''}
+                          onChange={(e) => handleValue2Change(group.id, condition.id, e.target.value)}
+                        />
+                      </div>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="secondary"
+                            onClick={(e) => {
+                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                              handlePickSecondInputForCondition(group.id, condition.id, {
+                                x: rect.left + rect.width / 2,
+                                y: rect.top + rect.height / 2,
+                              });
+                            }}
+                          >
+                            <Icon name="crosshair" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Link second filter input</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
                 </>
               )}
             </>

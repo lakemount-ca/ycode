@@ -1127,3 +1127,56 @@ export async function getUnpublishedPages(): Promise<Page[]> {
 
   return unpublishedPages;
 }
+
+/**
+ * Hard-delete soft-deleted draft pages and their published counterparts.
+ * Page layers are cleaned up automatically via CASCADE.
+ */
+export async function hardDeleteSoftDeletedPages(): Promise<{ count: number }> {
+  const client = await getSupabaseAdmin();
+
+  if (!client) {
+    throw new Error('Supabase not configured');
+  }
+
+  const { data: deletedDrafts, error } = await client
+    .from('pages')
+    .select('id')
+    .eq('is_published', false)
+    .not('deleted_at', 'is', null);
+
+  if (error) {
+    throw new Error(`Failed to fetch deleted draft pages: ${error.message}`);
+  }
+
+  if (!deletedDrafts || deletedDrafts.length === 0) {
+    return { count: 0 };
+  }
+
+  const ids = deletedDrafts.map(p => p.id);
+
+  // Delete published versions first (CASCADE removes page_layers)
+  const { error: pubError } = await client
+    .from('pages')
+    .delete()
+    .in('id', ids)
+    .eq('is_published', true);
+
+  if (pubError) {
+    console.error('Failed to delete published pages:', pubError);
+  }
+
+  // Delete soft-deleted draft versions (CASCADE removes page_layers)
+  const { error: draftError } = await client
+    .from('pages')
+    .delete()
+    .in('id', ids)
+    .eq('is_published', false)
+    .not('deleted_at', 'is', null);
+
+  if (draftError) {
+    throw new Error(`Failed to delete draft pages: ${draftError.message}`);
+  }
+
+  return { count: deletedDrafts.length };
+}

@@ -21,7 +21,7 @@ export const CANVAS_PADDING = CANVAS_BORDER * 2;
  */
 export function getCanvasIframeHtml(mountId: string = 'canvas-mount'): string {
   return `<!DOCTYPE html>
-<html style="height: 100%;">
+<html class="h-full">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -45,8 +45,8 @@ export function getCanvasIframeHtml(mountId: string = 'canvas-mount'): string {
   </style>
   <link rel="stylesheet" href="/canvas.css">
 </head>
-<body style="margin: 0; padding: 0; height: 100%;">
-  <div id="${mountId}" style="height: 100%;"></div>
+<body class="h-full">
+  <div id="${mountId}" class="contents"></div>
 </body>
 </html>`;
 }

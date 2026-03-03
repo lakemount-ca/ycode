@@ -16,6 +16,7 @@ import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react'
 
 // 2. External libraries
 import { ArrowLeft } from 'lucide-react';
+import { toast } from 'sonner';
 
 // 3. ShadCN UI
 import Icon from '@/components/ui/icon';
@@ -64,6 +65,7 @@ import { buildFieldGroupsForLayer, hasFieldsMatching, flattenFieldGroups, DISPLA
 import { getRichTextValue } from '@/lib/tiptap-utils';
 import { DropContainerIndicator, DropLineIndicator } from '@/components/DropIndicators';
 import { DragCaptureOverlay } from '@/components/DragCaptureOverlay';
+import ElementPickerOverlay from './ElementPickerOverlay';
 import { setDragCursor, clearDragCursor } from '@/lib/drag-cursor';
 
 // 7. Types
@@ -552,6 +554,8 @@ const CenterCanvas = React.memo(function CenterCanvas({
   const activeInteractionTriggerLayerId = useEditorStore((state) => state.activeInteractionTriggerLayerId);
   const richTextSheetLayerId = useEditorStore((state) => state.richTextSheetLayerId);
   const closeRichTextSheet = useEditorStore((state) => state.closeRichTextSheet);
+  const elementPicker = useEditorStore((state) => state.elementPicker);
+  const stopElementPicker = useEditorStore((state) => state.stopElementPicker);
   const assets = useAssetsStore((state) => state.assets);
 
   // Note: Canvas drag-and-drop state is handled by useCanvasDropDetection hook
@@ -1009,8 +1013,22 @@ const CenterCanvas = React.memo(function CenterCanvas({
   // Canvas callback handlers
   const handleCanvasLayerClick = useCallback((layerId: string, event?: React.MouseEvent) => {
     // Skip selection changes during drag operations
-    const { isDraggingLayerOnCanvas, isDraggingToCanvas } = useEditorStore.getState();
+    const { isDraggingLayerOnCanvas, isDraggingToCanvas, elementPicker: picker } = useEditorStore.getState();
     if (isDraggingLayerOnCanvas || isDraggingToCanvas) {
+      return;
+    }
+
+    // Element picker mode: intercept click to select an element
+    if (picker?.active && picker.onSelect) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      if (picker.validate && !picker.validate(layerId)) {
+        toast.error('Please select an input element inside a Filter form.');
+        return;
+      }
+      picker.onSelect(layerId);
       return;
     }
 
@@ -2145,12 +2163,16 @@ const CenterCanvas = React.memo(function CenterCanvas({
         {/* Drag capture overlay - prevents iframe from swallowing mouse events during drag */}
         {!isPreviewMode && <DragCaptureOverlay />}
 
+        {/* Element picker SVG connector overlay */}
+        <ElementPickerOverlay iframeElement={canvasIframeElement} zoom={zoom} />
+
         {/* Scrollable container with hidden scrollbars */}
         <div
           ref={scrollContainerRef}
           className={cn(
             'absolute inset-0 z-0',
-            isPreviewMode ? 'overflow-hidden' : 'overflow-auto'
+            isPreviewMode ? 'overflow-hidden' : 'overflow-auto',
+            elementPicker?.active && 'cursor-crosshair'
           )}
           style={{
             // Hide content until initial zoom is calculated to prevent layout jump

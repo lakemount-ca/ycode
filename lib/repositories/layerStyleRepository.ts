@@ -387,6 +387,55 @@ export async function getUnpublishedLayerStyles(): Promise<LayerStyle[]> {
 }
 
 /**
+ * Hard-delete soft-deleted draft layer styles and their published counterparts.
+ */
+export async function hardDeleteSoftDeletedLayerStyles(): Promise<{ count: number }> {
+  const client = await getSupabaseAdmin();
+  if (!client) {
+    throw new Error('Failed to initialize Supabase client');
+  }
+
+  const { data: deletedDrafts, error } = await client
+    .from('layer_styles')
+    .select('id')
+    .eq('is_published', false)
+    .not('deleted_at', 'is', null);
+
+  if (error) {
+    throw new Error(`Failed to fetch deleted draft layer styles: ${error.message}`);
+  }
+
+  if (!deletedDrafts || deletedDrafts.length === 0) {
+    return { count: 0 };
+  }
+
+  const ids = deletedDrafts.map(s => s.id);
+
+  const { error: pubError } = await client
+    .from('layer_styles')
+    .delete()
+    .in('id', ids)
+    .eq('is_published', true);
+
+  if (pubError) {
+    console.error('Failed to delete published layer styles:', pubError);
+  }
+
+  const { error: draftError } = await client
+    .from('layer_styles')
+    .delete()
+    .in('id', ids)
+    .eq('is_published', false)
+    .not('deleted_at', 'is', null);
+
+  if (draftError) {
+    throw new Error(`Failed to delete draft layer styles: ${draftError.message}`);
+  }
+
+  return { count: deletedDrafts.length };
+}
+
+/**
  * Get count of unpublished layer styles
  */
 export async function getUnpublishedLayerStylesCount(): Promise<number> {

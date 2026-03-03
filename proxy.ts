@@ -12,6 +12,12 @@ const PUBLIC_API_PREFIXES = [
   '/ycode/api/v1/',       // Public API — has own API key auth
 ];
 
+/**
+ * Patterns for collection item endpoints that must be accessible on published pages
+ * (load-more pagination, filter). Matched via regex since the collection ID is dynamic.
+ */
+const PUBLIC_COLLECTION_ITEM_SUFFIXES = ['/items/filter', '/items/load-more'];
+
 const PUBLIC_API_EXACT = [
   '/ycode/api/revalidate', // Cache revalidation — has own secret token auth
 ];
@@ -46,6 +52,12 @@ function isPublicApiRoute(pathname: string, method: string): boolean {
 
   if (PUBLIC_API_EXACT.includes(pathname)) return true;
   if (PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
+
+  // Collection item endpoints for published pages (POST only — filter, load-more)
+  if (method === 'POST' && pathname.startsWith('/ycode/api/collections/') &&
+      PUBLIC_COLLECTION_ITEM_SUFFIXES.some(suffix => pathname.endsWith(suffix))) {
+    return true;
+  }
 
   return false;
 }
@@ -107,13 +119,13 @@ export async function proxy(request: NextRequest) {
   const isPublicPage = !pathname.startsWith('/ycode')
     && !pathname.startsWith('/_next')
     && !pathname.startsWith('/api')
-    && !pathname.startsWith('/_dynamic');
+    && !pathname.startsWith('/dynamic');
   const hasPaginationParams = Array.from(request.nextUrl.searchParams.keys())
     .some((key) => key.startsWith('p_'));
 
   if (isPublicPage && hasPaginationParams) {
     const rewriteUrl = request.nextUrl.clone();
-    rewriteUrl.pathname = pathname === '/' ? '/_dynamic' : `/_dynamic${pathname}`;
+    rewriteUrl.pathname = pathname === '/' ? '/dynamic' : `/dynamic${pathname}`;
 
     const rewriteResponse = NextResponse.rewrite(rewriteUrl);
     rewriteResponse.headers.set('x-pathname', pathname);

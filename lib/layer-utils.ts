@@ -165,6 +165,61 @@ export function getCollectionVariable(layer: Layer): CollectionVariable | null {
   return layer.variables?.collection ?? null;
 }
 
+/** Input-type layer names that can be linked to filter conditions */
+const FILTER_INPUT_TYPES = ['input', 'select', 'textarea', 'checkbox', 'radio'];
+
+/**
+ * Check if a layer is an input-type element that is a descendant of a 'filter' layer.
+ * Used to validate element picker targets for collection filter linking.
+ */
+export function isInputInsideFilter(layerId: string, layers: Layer[]): boolean {
+  const findWithAncestors = (
+    searchLayers: Layer[],
+    ancestors: Layer[]
+  ): boolean => {
+    for (const layer of searchLayers) {
+      if (layer.id === layerId) {
+        if (!FILTER_INPUT_TYPES.includes(layer.name)) return false;
+        return ancestors.some(a => a.name === 'filter');
+      }
+      if (layer.children) {
+        if (findWithAncestors(layer.children, [...ancestors, layer])) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  return findWithAncestors(layers, []);
+}
+
+/**
+ * Get all input-type layers inside 'filter' layers from a layer tree.
+ * Returns array of { layerId, layerName, filterLayerId } for use in pickers/dropdowns.
+ */
+export function getFilterInputLayers(layers: Layer[]): Array<{ layerId: string; layerName: string; customName?: string; filterLayerId: string }> {
+  const results: Array<{ layerId: string; layerName: string; customName?: string; filterLayerId: string }> = [];
+
+  const walk = (searchLayers: Layer[], filterLayerId: string | null) => {
+    for (const layer of searchLayers) {
+      const currentFilterId = layer.name === 'filter' ? layer.id : filterLayerId;
+      if (currentFilterId && FILTER_INPUT_TYPES.includes(layer.name)) {
+        results.push({
+          layerId: layer.id,
+          layerName: layer.name,
+          customName: layer.customName,
+          filterLayerId: currentFilterId,
+        });
+      }
+      if (layer.children) {
+        walk(layer.children, currentFilterId);
+      }
+    }
+  };
+  walk(layers, null);
+  return results;
+}
+
 /**
  * Find a layer by ID in a tree structure
  * Recursively searches through layer tree

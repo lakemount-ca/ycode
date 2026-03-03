@@ -1095,15 +1095,17 @@ export const useCollectionsStore = create<CollectionsStore>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      // Optimistically update items order
+      // Optimistically update items order and sort by new manual_order
       set(state => {
         const items = state.items[collectionId] || [];
         const updateMap = new Map(updates.map(u => [u.id, u.manual_order]));
 
-        const updatedItems = items.map(item => {
-          const newOrder = updateMap.get(item.id);
-          return newOrder !== undefined ? { ...item, manual_order: newOrder } : item;
-        });
+        const updatedItems = items
+          .map(item => {
+            const newOrder = updateMap.get(item.id);
+            return newOrder !== undefined ? { ...item, manual_order: newOrder } : item;
+          })
+          .sort((a, b) => a.manual_order - b.manual_order);
 
         return {
           items: {

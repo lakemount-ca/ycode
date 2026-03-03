@@ -16,7 +16,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { createRoot, Root } from 'react-dom/client';
 
 import LayerRenderer from '@/components/LayerRenderer';
-import { serializeLayers } from '@/lib/layer-utils';
+import { serializeLayers, getClassesString } from '@/lib/layer-utils';
 import { collectEditorHiddenLayerIds } from '@/lib/animation-utils';
 import { getCanvasIframeHtml } from '@/lib/canvas-utils';
 import { cn } from '@/lib/utils';
@@ -135,6 +135,8 @@ function CanvasContent({
   editorHiddenLayerIds,
   editorBreakpoint,
 }: CanvasContentProps) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+
   // Seed ancestor set with the component being edited so its own rich-text
   // collection data cannot re-embed itself (prevents infinite loops)
   const initialAncestorIds = useMemo(
@@ -150,37 +152,57 @@ function CanvasContent({
     }
   };
 
+  const bodyLayer = layers.find(l => l.id === 'body');
+  const bodyClasses = bodyLayer ? getClassesString(bodyLayer) : '';
+  const childLayers = bodyLayer
+    ? [...(bodyLayer.children || []), ...layers.filter(l => l.id !== 'body')]
+    : layers;
+
+  // Move body layer classes from #canvas-body to the iframe's <body> element
+  useEffect(() => {
+    if (!bodyRef.current) return;
+    const iframeBody = bodyRef.current.ownerDocument.body;
+    const resolvedClasses = editingComponentId
+      ? 'bg-transparent'
+      : (bodyClasses || 'bg-white');
+    const classes = resolvedClasses.split(/\s+/).filter(Boolean);
+    if (classes.length > 0) {
+      iframeBody.classList.add(...classes);
+      classes.forEach(c => bodyRef.current?.classList.remove(c));
+    }
+    return () => {
+      if (classes.length > 0) {
+        iframeBody.classList.remove(...classes);
+      }
+    };
+  }, [bodyClasses, editingComponentId]);
+
   return (
     <div
+      ref={bodyRef}
       id="canvas-body"
       data-layer-id="body"
-      className={cn('h-full min-h-full', editingComponentId ? 'bg-transparent' : 'bg-white')}
+      className="contents"
       onClick={handleBodyClick}
     >
-      {layers.length > 0 ? (
-        <LayerRenderer
-          layers={layers}
-          isEditMode={true}
-          isPublished={false}
-          selectedLayerId={selectedLayerId}
-          hoveredLayerId={hoveredLayerId}
-          onLayerClick={onLayerClick}
-          onLayerUpdate={onLayerUpdate}
-          onLayerHover={onLayerHover}
-          pageId={pageId}
-          pageCollectionItemData={pageCollectionItemData}
-          liveLayerUpdates={liveLayerUpdates}
-          liveComponentUpdates={liveComponentUpdates}
-          editingComponentVariables={editingComponentVariables}
-          editorHiddenLayerIds={editorHiddenLayerIds}
-          editorBreakpoint={editorBreakpoint}
-          ancestorComponentIds={initialAncestorIds}
-        />
-      ) : (
-        <div className="flex items-center justify-center min-h-50 text-gray-400">
-          No layers to display
-        </div>
-      )}
+      <LayerRenderer
+        layers={childLayers}
+        isEditMode={true}
+        isPublished={false}
+        selectedLayerId={selectedLayerId}
+        hoveredLayerId={hoveredLayerId}
+        onLayerClick={onLayerClick}
+        onLayerUpdate={onLayerUpdate}
+        onLayerHover={onLayerHover}
+        pageId={pageId}
+        pageCollectionItemData={pageCollectionItemData}
+        liveLayerUpdates={liveLayerUpdates}
+        liveComponentUpdates={liveComponentUpdates}
+        editingComponentVariables={editingComponentVariables}
+        editorHiddenLayerIds={editorHiddenLayerIds}
+        editorBreakpoint={editorBreakpoint}
+        ancestorComponentIds={initialAncestorIds}
+      />
     </div>
   );
 }

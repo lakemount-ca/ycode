@@ -533,6 +533,7 @@ export const collectionsApi = {
       sortBy?: string;
       sortOrder?: string;
       offset?: number;
+      filters?: Array<{ fieldId: string; operator: string; value: string }>;
     }
   ): Promise<ApiResponse<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number }>> {
     const params = new URLSearchParams();
@@ -542,6 +543,7 @@ export const collectionsApi = {
     if (options?.sortBy) params.append('sortBy', options.sortBy);
     if (options?.sortOrder) params.append('sortOrder', options.sortOrder);
     if (options?.offset !== undefined) params.append('offset', options.offset.toString());
+    if (options?.filters?.length) params.append('filters', JSON.stringify(options.filters));
     const queryString = params.toString();
     const url = `/ycode/api/collections/${collectionId}/items${queryString ? `?${queryString}` : ''}`;
     return apiRequest<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number }>(url);

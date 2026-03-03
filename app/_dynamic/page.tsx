@@ -21,7 +21,8 @@ export default async function DynamicHome({ searchParams }: DynamicHomeProps) {
   const pageNumbers: Record<string, number> = {};
   for (const [key, value] of Object.entries(resolvedSearchParams)) {
     if (key.startsWith('p_') && typeof value === 'string') {
-      const layerId = key.slice(2);
+      const strippedId = key.slice(2);
+      const layerId = strippedId.startsWith('lyr-') ? strippedId : `lyr-${strippedId}`;
       const pageNum = parseInt(value, 10);
       if (!isNaN(pageNum) && pageNum >= 1) {
         pageNumbers[layerId] = pageNum;

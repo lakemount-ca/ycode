@@ -194,6 +194,18 @@ export default function InputSettings({ layer, onLayerUpdate }: InputSettingsPro
           </>
         ) : (
           <>
+            {/* Name - used as the URL parameter key for filters */}
+            <div className="grid grid-cols-3">
+              <Label variant="muted">Name</Label>
+              <div className="col-span-2 *:w-full">
+                <Input
+                  value={name}
+                  onChange={(e) => handleAttributeChange('name', e.target.value)}
+                  placeholder="Field"
+                />
+              </div>
+            </div>
+
             {/* Type selector - only for input elements (not checkbox/radio) */}
             {isInputLayer && (
               <div className="grid grid-cols-3">
