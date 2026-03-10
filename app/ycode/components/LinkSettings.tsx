@@ -782,12 +782,12 @@ export default function LinkSettings(props: LinkSettingsProps) {
             {linkType !== 'none' && (
               <Button
                 variant="ghost"
-                size="icon"
-                className="size-8 shrink-0"
+                size="xs"
+                className="size-6 shrink-0 p-0"
                 onClick={() => handleLinkTypeChange('none')}
                 disabled={isLockedByOther}
               >
-                <Icon name="x" className="size-3" />
+                <Icon name="x" className="size-2.5" />
               </Button>
             )}
           </div>
