@@ -62,4 +62,28 @@ export const contentTemplates: Record<string, BlockTemplate> = {
       }
     }
   },
+
+  richText: {
+    icon: 'rich-text',
+    name: 'Rich Text',
+    template: {
+      name: 'richText',
+      classes: ['text-[16px]'],
+      restrictions: { editText: true },
+      design: {
+        typography: {
+          isActive: true,
+          fontSize: '16px',
+        }
+      },
+      variables: {
+        text: {
+          type: 'dynamic_rich_text',
+          data: {
+            content: getTiptapTextContent('Rich text block. Supports multiple paragraphs, headings, lists and more.')
+          }
+        }
+      }
+    }
+  },
 };

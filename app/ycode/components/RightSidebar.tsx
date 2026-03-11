@@ -85,7 +85,7 @@ import { useLayerLocks } from '@/hooks/use-layer-locks';
 import { classesToDesign, mergeDesign, removeConflictsForClass, getRemovedPropertyClasses } from '@/lib/tailwind-class-mapper';
 import { cn } from '@/lib/utils';
 import { sanitizeHtmlId } from '@/lib/html-utils';
-import { isFieldVariable, getCollectionVariable, findParentCollectionLayer, findAllParentCollectionLayers, isTextEditable, isTextContentLayer, isHeadingLayer, findLayerWithParent, resetBindingsOnCollectionSourceChange, isInputInsideFilter } from '@/lib/layer-utils';
+import { isFieldVariable, getCollectionVariable, findParentCollectionLayer, findAllParentCollectionLayers, isTextEditable, isTextContentLayer, isRichTextLayer, isHeadingLayer, findLayerWithParent, resetBindingsOnCollectionSourceChange, isInputInsideFilter } from '@/lib/layer-utils';
 import { detachSpecificLayerFromComponent } from '@/lib/component-utils';
 import { convertContentToValue, parseValueToContent } from '@/lib/cms-variables-utils';
 import { createTextComponentVariableValue } from '@/lib/variable-utils';
@@ -473,9 +473,9 @@ const RightSidebar = React.memo(function RightSidebar({
         return true;
 
       case 'typography':
-        // Typography controls: show in text edit mode or for text elements, buttons, icons, form inputs, body, and fraction
+        // Typography controls: show in text edit mode or for text elements, rich text, buttons, icons, form inputs, body, and fraction
         if (showTextStyleControls) return true;
-        return isTextLayer(layer) || isButtonLayer(layer) || isIconLayer(layer) || isFormInputLayer(layer) || layer.id === 'body' || layer.name === 'slideFraction';
+        return isTextLayer(layer) || isRichTextLayer(layer) || isButtonLayer(layer) || isIconLayer(layer) || isFormInputLayer(layer) || layer.id === 'body' || layer.name === 'slideFraction';
 
       case 'backgrounds':
         // Background controls: hide for text layers (image is in the color picker's image tab)
@@ -2096,6 +2096,7 @@ const RightSidebar = React.memo(function RightSidebar({
                           allFields={fields}
                           collections={collections}
                           disabled={showTextStyleControls}
+                          buttonOnly={isRichTextLayer(selectedLayer)}
                         />
                       )}
                     </div>

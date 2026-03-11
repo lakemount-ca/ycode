@@ -364,14 +364,13 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
         Code,
       ];
 
-      // Add heading extension for full variant (CMS rich-text)
-      if (isFullVariant) {
-        formattingExtensions.push(
-          Heading.configure({
-            levels: [1, 2, 3, 4, 5, 6],
-          })
-        );
-      }
+      // Always include heading extension so content with headings is preserved
+      // even in compact variant (toolbar visibility is controlled separately)
+      formattingExtensions.push(
+        Heading.configure({
+          levels: [1, 2, 3, 4, 5, 6],
+        })
+      );
 
       // Add link extension unless explicitly disabled
       if (!disableLinks) {
@@ -393,7 +392,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
     }
 
     return baseExtensions;
-  }, [placeholder, withFormatting, disableLinks, isFullVariant]);
+  }, [placeholder, withFormatting, disableLinks]);
 
   const editor = useEditor({
     immediatelyRender: true,

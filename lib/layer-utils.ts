@@ -451,6 +451,14 @@ export function isTextContentLayer(layer: Layer | null | undefined): boolean {
 }
 
 /**
+ * Check if a layer is a rich text element (block-level text with full formatting).
+ */
+export function isRichTextLayer(layer: Layer | null | undefined): boolean {
+  if (!layer) return false;
+  return layer.name === 'richText';
+}
+
+/**
  * Check if a layer is a heading element.
  * Includes backward compat: text layers with h1-h6 tag are treated as headings.
  */
@@ -624,7 +632,7 @@ export function canHaveChildren(layer: Layer, childLayerType?: string): boolean 
 
   const blocksWithoutChildren = [
     'icon', 'image', 'audio', 'video', 'iframe',
-    'heading', 'text', 'span', 'label', 'hr',
+    'heading', 'text', 'richText', 'span', 'label', 'hr',
     'input', 'textarea', 'select', 'checkbox', 'radio',
     'htmlEmbed',
   ];
@@ -1017,6 +1025,9 @@ export function getLayerIcon(
   // Heading layers
   if (layer.name === 'heading') return 'heading';
 
+  // Rich text layers
+  if (layer.name === 'richText') return 'rich-text';
+
   // Text layers (backward compat: text with h1-h6 tag still shows heading icon)
   if (layer.name === 'text') {
     return ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(layer.settings?.tag || '') ? 'heading' : 'text';
@@ -1122,6 +1133,11 @@ export function getLayerHtmlTag(layer: Layer): string {
   // Heading layers default to h2 when no tag is set
   if (layer.name === 'heading') {
     return 'h2';
+  }
+
+  // Rich text renders as div (contains block-level content)
+  if (layer.name === 'richText') {
+    return 'div';
   }
 
   // Slider sub-layers always render as divs
