@@ -104,7 +104,20 @@ export const useColorVariablesStore = create<ColorVariablesStore>((set, get) => 
   deleteColorVariable: async (id) => {
     try {
       const variable = get().colorVariables.find((v) => v.id === id);
-      const hexValue = variable?.value || '#000000';
+      const rawValue = variable?.value || '#000000';
+      const hexOnly = rawValue.split('/')[0];
+
+      const toCssRgba = (val: string): string => {
+        const parts = val.split('/');
+        if (parts.length < 2) return val;
+        const hex = parts[0];
+        const opacity = parseInt(parts[1]) / 100;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r},${g},${b},${opacity})`;
+      };
+      const cssValue = toCssRgba(rawValue);
 
       const response = await colorVariablesApi.delete(id);
 
@@ -113,7 +126,7 @@ export const useColorVariablesStore = create<ColorVariablesStore>((set, get) => 
         return false;
       }
 
-      // Detach variable from all layers, replacing with resolved hex
+      // Detach variable from all layers, replacing with resolved color
       try {
         const { usePagesStore } = await import('./usePagesStore');
         const { useComponentsStore } = await import('./useComponentsStore');
@@ -122,8 +135,8 @@ export const useColorVariablesStore = create<ColorVariablesStore>((set, get) => 
 
         const replaceInClasses = (classes: string | string[]): string | string[] => {
           const replace = (s: string) =>
-            s.replaceAll(`color:var(--${id})`, hexValue)
-              .replaceAll(`var(--${id})`, hexValue);
+            s.replaceAll(`color:var(--${id})`, rawValue)
+              .replaceAll(`var(--${id})`, cssValue);
           if (Array.isArray(classes)) {
             return classes.map(replace);
           }
@@ -179,12 +192,23 @@ export const useColorVariablesStore = create<ColorVariablesStore>((set, get) => 
     const { colorVariables, previewOverride } = get();
     if (colorVariables.length === 0 && !previewOverride) return '';
 
+    const toCssValue = (val: string): string => {
+      const parts = val.split('/');
+      if (parts.length < 2) return val;
+      const hex = parts[0];
+      const opacity = parseInt(parts[1]) / 100;
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r},${g},${b},${opacity})`;
+    };
+
     const declarations = colorVariables
       .map((v) => {
         if (previewOverride && v.id === previewOverride.id) {
-          return `--${v.id}: ${previewOverride.value};`;
+          return `--${v.id}: ${toCssValue(previewOverride.value)};`;
         }
-        return `--${v.id}: ${v.value};`;
+        return `--${v.id}: ${toCssValue(v.value)};`;
       })
       .join(' ');
 

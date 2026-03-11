@@ -36,12 +36,23 @@ interface BorderControlsProps {
   collections?: Collection[];
 }
 
+function hexToRgba(value: string): string {
+  const parts = value.split('/');
+  if (parts.length < 2) return value;
+  const hex = parts[0];
+  const opacity = parseInt(parts[1]) / 100;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${opacity})`;
+}
+
 function parseBorderColorToCss(color: string, colorVariables?: import('@/types').ColorVariable[]): string {
   if (!color) return '#000000';
   const varMatch = color.match(/^color:var\(--(.+)\)$/);
   if (varMatch && colorVariables) {
     const variable = colorVariables.find((v) => v.id === varMatch[1]);
-    return variable?.value || '#000000';
+    return variable ? hexToRgba(variable.value) : '#000000';
   }
   const match = color.match(/^(#[0-9a-fA-F]{6})\/(\d+)$/);
   if (match) {

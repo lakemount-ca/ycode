@@ -555,8 +555,6 @@ export function propertyToClass(
       case 'color':
         // Check if value is a gradient (linear-gradient or radial-gradient)
         if (value.includes('gradient(')) {
-          // For gradients on text, we need bg-[gradient] + bg-clip-text + text-transparent
-          // Note: This returns space-separated classes that will be split by the caller
           return `bg-[${value}] bg-clip-text text-transparent`;
         }
         if (value.startsWith('color:var(')) {

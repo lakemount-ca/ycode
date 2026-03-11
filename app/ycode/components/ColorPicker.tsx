@@ -130,6 +130,21 @@ function rgbaToHex(rgba: { r: number; g: number; b: number; a: number }): string
   return hex;
 }
 
+/**
+ * Convert a hex color with optional opacity to a CSS rgba string.
+ * e.g. "#ff0000/50" → "rgba(255,0,0,0.5)", "#ff0000" → "#ff0000"
+ */
+function hexToRgba(value: string): string {
+  const parts = value.split('/');
+  const hex = parts[0];
+  if (parts.length < 2) return hex;
+  const opacity = parseInt(parts[1]) / 100;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${opacity})`;
+}
+
 // Helper to get just the hex part (6 chars) from a color value
 function getHexOnly(colorValue: string): string {
   if (!colorValue) return '#000000';
@@ -841,8 +856,7 @@ function ColorVariablesSection({
   onSelect,
 }: ColorVariablesSectionProps) {
   const handleStartCreate = () => {
-    const baseColor = currentColor.split('/')[0];
-    onEditStateChange({ mode: 'create', name: '', color: baseColor || '#000000' });
+    onEditStateChange({ mode: 'create', name: '', color: currentColor || '#000000' });
   };
 
   const handleCreate = async () => {
@@ -924,7 +938,7 @@ function ColorVariablesSection({
                         <div className="size-5 rounded-[6px] -ml-1 shrink-0 relative overflow-hidden">
                           <div
                             className="absolute inset-0 z-20"
-                            style={{ background: v.value }}
+                            style={{ background: hexToRgba(v.value) }}
                           />
                           <div className="absolute inset-0 opacity-15 bg-checkerboard bg-background z-10" />
                         </div>
@@ -1110,7 +1124,11 @@ export default function ColorPicker({
       tabBeforeVarEdit.current = activeTab;
       stopBeforeVarEdit.current = selectedStopId;
       setActiveTab('solid');
-      const parsed = parseColor(varEditState.color);
+      const colorParts = varEditState.color.split('/');
+      const parsed = parseColor(colorParts[0]);
+      if (colorParts.length > 1) {
+        parsed.a = parseInt(colorParts[1]) / 100;
+      }
       setRgbaColor(parsed);
       const hsv = rgbToHsv(parsed.r, parsed.g, parsed.b);
       setHue(hsv.h);
@@ -1184,6 +1202,12 @@ export default function ColorPicker({
         ? activeVariable.value
         : displayValue;
       const newColor = parseColor(colorToSync);
+      if (isColorVariable && activeVariable) {
+        const valParts = activeVariable.value.split('/');
+        if (valParts.length > 1) {
+          newColor.a = parseInt(valParts[1]) / 100;
+        }
+      }
       setRgbaColor(newColor);
       // Only update HSV values when color changes externally (not from internal updates)
       if (!isInternalUpdate.current) {
@@ -1221,16 +1245,15 @@ export default function ColorPicker({
   // Solid color handlers
   const handleRgbaChange = (color: { r: number; g: number; b: number; a: number }) => {
     setRgbaColor(color);
-    // Mark as internal update to prevent hue recalculation in useEffect
     isInternalUpdate.current = true;
     if (varEditState?.mode === 'edit' && varEditState.id) {
-      const hex = rgbaToHex(color).split('/')[0];
-      setVarEditState({ ...varEditState, color: hex });
-      setPreviewOverride({ id: varEditState.id, value: hex });
+      const colorValue = rgbaToHex(color);
+      setVarEditState({ ...varEditState, color: colorValue });
+      setPreviewOverride({ id: varEditState.id, value: hexToRgba(colorValue) });
     } else {
       immediateOnChange(rgbaToHex(color));
       if (varEditState?.mode === 'create') {
-        setVarEditState({ ...varEditState, color: rgbaToHex(color).split('/')[0] });
+        setVarEditState({ ...varEditState, color: rgbaToHex(color) });
       }
     }
   };
@@ -1455,7 +1478,7 @@ export default function ColorPicker({
       const id = color.match(/^var\(--([^)]+)\)$/)?.[1];
       if (id) {
         const cv = colorVariables.find((v) => v.id === id);
-        if (cv) return cv.value;
+        if (cv) return hexToRgba(cv.value);
       }
       return '#888888';
     }
@@ -1466,7 +1489,7 @@ export default function ColorPicker({
     if (!isGradient || !displayValue) return displayValue;
     return displayValue.replace(/var\(--([^)]+)\)(\d)/g, (_match, id, digit) => {
       const cv = colorVariables.find((v) => v.id === id);
-      return `${cv ? cv.value : '#888888'} ${digit}`;
+      return `${cv ? hexToRgba(cv.value) : '#888888'} ${digit}`;
     });
   }, [displayValue, isGradient, colorVariables]);
 
@@ -1813,7 +1836,7 @@ export default function ColorPicker({
                 alt=""
               />
             ) : (
-              <div className="absolute inset-0 z-20" style={isTransparent ? undefined : { background: isColorVariable && activeVariable ? activeVariable.value : isGradient ? resolvedDisplayValue : `rgba(${Math.round(rgbaColor.r)},${Math.round(rgbaColor.g)},${Math.round(rgbaColor.b)},${rgbaColor.a})` }} />
+              <div className="absolute inset-0 z-20" style={isTransparent ? undefined : { background: isColorVariable && activeVariable ? hexToRgba(activeVariable.value) : isGradient ? resolvedDisplayValue : `rgba(${Math.round(rgbaColor.r)},${Math.round(rgbaColor.g)},${Math.round(rgbaColor.b)},${rgbaColor.a})` }} />
             )}
             <div className="absolute inset-0 opacity-15 bg-checkerboard bg-background z-10" />
           </div>

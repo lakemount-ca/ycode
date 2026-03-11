@@ -101,7 +101,17 @@ export const fetchGlobalPageSettings = cache(async (): Promise<GlobalPageSetting
   try {
     const colorVars = await getAllColorVariables();
     if (colorVars.length > 0) {
-      const declarations = colorVars.map((v) => `--${v.id}: ${v.value};`).join(' ');
+      const toCssValue = (val: string): string => {
+        const parts = val.split('/');
+        if (parts.length < 2) return val;
+        const hex = parts[0];
+        const opacity = parseInt(parts[1]) / 100;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r},${g},${b},${opacity})`;
+      };
+      const declarations = colorVars.map((v) => `--${v.id}: ${toCssValue(v.value)};`).join(' ');
       colorVariablesCss = `:root { ${declarations} }`;
     }
   } catch {
