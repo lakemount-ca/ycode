@@ -35,6 +35,7 @@ import PublishPopover from './PublishPopover';
 import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
 import { Separator } from '@/components/ui/separator';
+import { BackupRestoreDialog } from '@/components/project/BackupRestoreDialog';
 
 interface HeaderBarProps {
   user: User | null;
@@ -124,6 +125,7 @@ export default function HeaderBar({
   });
   const [baseUrl, setBaseUrl] = useState<string>('');
   const [hasUpdate, setHasUpdate] = useState(false);
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
 
   // Get current host after mount
   useEffect(() => {
@@ -351,6 +353,12 @@ export default function HeaderBar({
               onClick={() => router.push('/ycode/integrations/apps')}
             >
               Integrations
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              onClick={() => setShowTransferDialog(true)}
+            >
+              Backup &amp; Restore
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
@@ -597,6 +605,11 @@ export default function HeaderBar({
 
       </div>
     </header>
+
+    <BackupRestoreDialog
+      open={showTransferDialog}
+      onOpenChange={setShowTransferDialog}
+    />
     </>
   );
 }
