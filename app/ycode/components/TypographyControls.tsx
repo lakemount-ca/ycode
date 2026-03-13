@@ -19,6 +19,7 @@ import { extractMeasurementValue } from '@/lib/measurement-utils';
 import { removeSpaces } from '@/lib/utils';
 import { getFontAvailableWeights, FONT_WEIGHTS } from '@/lib/font-utils';
 import { buildBgImgVarName } from '@/lib/tailwind-class-mapper';
+import { isTextContentLayer } from '@/lib/layer-utils';
 import type { Collection, CollectionField, Layer } from '@/types';
 import type { FieldGroup } from '@/lib/collection-field-utils';
 import ColorPropertyField from './ColorPropertyField';
@@ -232,9 +233,9 @@ export default function TypographyControls({ layer, onLayerUpdate, activeTextSty
     debouncedUpdateDesignProperty('typography', 'underlineOffset', sanitized || null);
   };
 
-  // Check if the layer is an icon or text
+  // Check if the layer is an icon or text-content element
   const isIcon = layer?.name === 'icon';
-  const isText = layer?.name === 'text';
+  const isText = isTextContentLayer(layer);
 
   const bgImageRef = useRef<TextBackgroundImageTabHandle>(null);
   const handleImageActivate = useCallback(() => bgImageRef.current?.activate(), []);

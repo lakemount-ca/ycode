@@ -79,7 +79,7 @@ import { useVersionsStore } from '@/stores/useVersionsStore';
 
 // 6. Utils/lib
 import { findHomepage } from '@/lib/page-utils';
-import { findLayerById, getClassesString, removeLayerById, canCopyLayer, canDeleteLayer, regenerateIdsWithInteractionRemapping, findParentAndIndex, insertLayerAfter, updateLayerProps } from '@/lib/layer-utils';
+import { findLayerById, getClassesString, removeLayerById, canCopyLayer, canDeleteLayer, regenerateIdsWithInteractionRemapping, findParentAndIndex, insertLayerAfter, updateLayerProps, removeRichTextSublayer } from '@/lib/layer-utils';
 import { cloneDeep } from 'lodash';
 
 // 5. Types
@@ -126,6 +126,8 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
   const createComponentDialog = useEditorStore((state) => state.createComponentDialog);
   const openCreateComponentDialog = useEditorStore((state) => state.openCreateComponentDialog);
   const closeCreateComponentDialog = useEditorStore((state) => state.closeCreateComponentDialog);
+  const activeSublayerIndex = useEditorStore((state) => state.activeSublayerIndex);
+  const setActiveSublayerIndex = useEditorStore((state) => state.setActiveSublayerIndex);
 
   const collections = useCollectionsStore((state) => state.collections);
   const selectedCollectionId = useCollectionsStore((state) => state.selectedCollectionId);
@@ -712,6 +714,25 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
   const deleteSelectedLayer = useCallback(() => {
     if (!selectedLayerId) return;
 
+    // Handle sublayer deletion (remove TipTap block, not the whole layer)
+    if (activeSublayerIndex !== null) {
+      const layers = getCurrentLayers();
+      const richTextLayer = findLayerById(layers, selectedLayerId);
+      if (!richTextLayer) return;
+
+      const updates = removeRichTextSublayer(richTextLayer, activeSublayerIndex);
+      if (!updates) return;
+
+      if (currentPageId) {
+        updateLayer(currentPageId, selectedLayerId, updates);
+      } else if (editingComponentId) {
+        const newLayers = layers.map(l => l.id === selectedLayerId ? { ...l, ...updates } : l);
+        updateCurrentLayers(newLayers);
+      }
+      setActiveSublayerIndex(null);
+      return;
+    }
+
     // Find the next layer to select before deleting
     const layers = getCurrentLayers();
     const layerToDelete = findLayerById(layers, selectedLayerId);
@@ -779,7 +800,7 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
         liveLayerUpdates.broadcastLayerDelete(currentPageId, selectedLayerId);
       }
     }
-  }, [selectedLayerId, editingComponentId, currentPageId, getCurrentLayers, updateCurrentLayers, deleteLayer, setSelectedLayerId, liveLayerUpdates]);
+  }, [selectedLayerId, editingComponentId, currentPageId, getCurrentLayers, updateCurrentLayers, deleteLayer, setSelectedLayerId, liveLayerUpdates, activeSublayerIndex, setActiveSublayerIndex, updateLayer]);
 
   // Immediate save function (bypasses debouncing)
   const saveImmediately = useCallback(async (pageId: string) => {
