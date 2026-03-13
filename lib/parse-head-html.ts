@@ -1,6 +1,4 @@
 import React from 'react';
-import { resolveCustomCodePlaceholders } from '@/lib/resolve-cms-variables';
-import type { Page, CollectionItemWithValues, CollectionField } from '@/types';
 
 const VOID_TAGS = new Set(['meta', 'link', 'base']);
 
@@ -21,6 +19,9 @@ const BOOLEAN_ATTRS = new Set([
   'readonly', 'required', 'reversed', 'scoped',
 ]);
 
+const TAG_REGEX =
+  /<(meta|link|base)(\s(?:[^>"']|"[^"]*"|'[^']*')*)?\s*\/?>|<(style|script|title|noscript)(\s[^>]*)?>[\s\S]*?<\/\3\s*>/gi;
+
 function parseAttributes(attrString: string): Record<string, unknown> {
   const attrs: Record<string, unknown> = {};
   const regex = /([\w-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+)))?/g;
@@ -39,19 +40,22 @@ function parseAttributes(attrString: string): Record<string, unknown> {
   return attrs;
 }
 
-/** Parse an HTML string of head elements into individual React elements. */
+function extractInnerHtml(full: string, tag: string): string {
+  const innerMatch = full.match(
+    new RegExp(`<${tag}[^>]*>([\\s\\S]*)<\\/${tag}\\s*>`, 'i'),
+  );
+  return innerMatch ? innerMatch[1] : '';
+}
+
+/** Parse an HTML string of head elements into React elements (for use inside a real <head> tag). */
 export function parseHeadHtml(html: string): React.ReactNode[] {
   const elements: React.ReactNode[] = [];
-
-  // Matches void tags (meta/link/base) and paired tags (style/script/title/noscript).
-  // Void tag attrs use (?:[^>"']|"[^"]*"|'[^']*')* to handle `>` inside quoted values.
-  const regex =
-    /<(meta|link|base)(\s(?:[^>"']|"[^"]*"|'[^']*')*)?\s*\/?>|<(style|script|title|noscript)(\s[^>]*)?>[\s\S]*?<\/\3\s*>/gi;
+  TAG_REGEX.lastIndex = 0;
 
   let match;
   let key = 0;
 
-  while ((match = regex.exec(html)) !== null) {
+  while ((match = TAG_REGEX.exec(html)) !== null) {
     const voidTag = match[1]?.toLowerCase();
     const voidAttrStr = match[2] || '';
     const pairedTag = match[3]?.toLowerCase();
@@ -62,11 +66,7 @@ export function parseHeadHtml(html: string): React.ReactNode[] {
       elements.push(React.createElement(voidTag, { key: key++, ...attrs }));
     } else if (pairedTag) {
       const attrs = parseAttributes(pairedAttrStr.trim());
-      const full = match[0];
-      const innerMatch = full.match(
-        new RegExp(`<${pairedTag}[^>]*>([\\s\\S]*)<\\/${pairedTag}\\s*>`, 'i'),
-      );
-      const inner = innerMatch ? innerMatch[1] : '';
+      const inner = extractInnerHtml(match[0], pairedTag);
 
       if (pairedTag === 'title') {
         elements.push(React.createElement('title', { key: key++ }, inner));
@@ -83,21 +83,4 @@ export function parseHeadHtml(html: string): React.ReactNode[] {
   }
 
   return elements;
-}
-
-/** Resolve page-specific custom head code with CMS variable substitution. */
-export function getPageHeadElements(
-  page: Page,
-  collectionItem?: CollectionItemWithValues,
-  collectionFields?: CollectionField[],
-): React.ReactNode[] | null {
-  const raw = page.settings?.custom_code?.head || '';
-  if (!raw) return null;
-
-  const resolved = page.is_dynamic && collectionItem
-    ? resolveCustomCodePlaceholders(raw, collectionItem, collectionFields || [])
-    : raw;
-
-  if (!resolved) return null;
-  return parseHeadHtml(resolved);
 }

@@ -59,7 +59,7 @@ import RichTextEditorSheet from './RichTextEditorSheet';
 import { buildLocalizedSlugPath, buildLocalizedDynamicPageUrl } from '@/lib/page-utils';
 import { getTranslationValue } from '@/lib/localisation-utils';
 import { cn } from '@/lib/utils';
-import { getCollectionVariable, canDeleteLayer, findLayerById, findParentCollectionLayer, canLayerHaveLink, updateLayerProps } from '@/lib/layer-utils';
+import { getCollectionVariable, canDeleteLayer, findLayerById, findParentCollectionLayer, canLayerHaveLink, updateLayerProps, removeRichTextSublayer } from '@/lib/layer-utils';
 import { CANVAS_BORDER, CANVAS_PADDING } from '@/lib/canvas-utils';
 import { buildFieldGroupsForLayer, hasFieldsMatching, flattenFieldGroups, DISPLAYABLE_FIELD_TYPES } from '@/lib/collection-field-utils';
 import { getRichTextValue } from '@/lib/tiptap-utils';
@@ -537,7 +537,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
   const getReturnDestination = useEditorStore((state) => state.getReturnDestination);
   const clearSelection = useEditorStore((state) => state.clearSelection);
   const setActiveSidebarTab = useEditorStore((state) => state.setActiveSidebarTab);
-  const setActiveTextStyleKey = useEditorStore((state) => state.setActiveTextStyleKey);
+  const selectLayerWithSublayer = useEditorStore((state) => state.selectLayerWithSublayer);
 
   const selectedLocaleId = useLocalisationStore((state) => state.selectedLocaleId);
   const getSelectedLocale = useLocalisationStore((state) => state.getSelectedLocale);
@@ -554,6 +554,9 @@ const CenterCanvas = React.memo(function CenterCanvas({
   const activeInteractionTriggerLayerId = useEditorStore((state) => state.activeInteractionTriggerLayerId);
   const richTextSheetLayerId = useEditorStore((state) => state.richTextSheetLayerId);
   const closeRichTextSheet = useEditorStore((state) => state.closeRichTextSheet);
+  const activeSublayerIndex = useEditorStore((state) => state.activeSublayerIndex);
+  const setActiveSublayerIndex = useEditorStore((state) => state.setActiveSublayerIndex);
+  const activeListItemIndex = useEditorStore((state) => state.activeListItemIndex);
   const elementPicker = useEditorStore((state) => state.elementPicker);
   const stopElementPicker = useEditorStore((state) => state.stopElementPicker);
   const assets = useAssetsStore((state) => state.assets);
@@ -571,8 +574,6 @@ const CenterCanvas = React.memo(function CenterCanvas({
   const toggleStrike = useCanvasTextEditorStore((state) => state.toggleStrike);
   const toggleSubscript = useCanvasTextEditorStore((state) => state.toggleSubscript);
   const toggleSuperscript = useCanvasTextEditorStore((state) => state.toggleSuperscript);
-  const toggleBulletList = useCanvasTextEditorStore((state) => state.toggleBulletList);
-  const toggleOrderedList = useCanvasTextEditorStore((state) => state.toggleOrderedList);
   const setHeading = useCanvasTextEditorStore((state) => state.setHeading);
   const focusEditor = useCanvasTextEditorStore((state) => state.focusEditor);
   const requestFinishEditing = useCanvasTextEditorStore((state) => state.requestFinish);
@@ -1029,30 +1030,43 @@ const CenterCanvas = React.memo(function CenterCanvas({
     }
 
     if (!isPreviewMode) {
-      setSelectedLayerId(layerId);
       // Switch to Layers tab when a layer is clicked on canvas
       setActiveSidebarTab('layers');
 
-      // Detect if clicked on a text style element (bold, italic, etc.)
+      // Detect if clicked on a text style element or a richText sublayer block
+      let textStyleKey: string | null = null;
+      let blockIndex: number | null = null;
+      let listItemIndex: number | null = null;
+
       if (event) {
         let target = event.target as HTMLElement;
-        let textStyleKey: string | null = null;
 
-        // Walk up the DOM tree to find data-style attribute
+        // Walk up the DOM tree to find data-style, data-block-index, data-list-item-index
         while (target && target !== event.currentTarget) {
-          const styleAttr = target.getAttribute?.('data-style');
-          if (styleAttr) {
-            textStyleKey = styleAttr;
-            break;
+          if (!textStyleKey) {
+            const styleAttr = target.getAttribute?.('data-style');
+            if (styleAttr) textStyleKey = styleAttr;
+          }
+          if (listItemIndex === null) {
+            const listItemAttr = target.getAttribute?.('data-list-item-index');
+            if (listItemAttr !== null) listItemIndex = parseInt(listItemAttr, 10);
+          }
+          if (blockIndex === null) {
+            const blockAttr = target.getAttribute?.('data-block-index');
+            if (blockAttr !== null) blockIndex = parseInt(blockAttr, 10);
           }
           target = target.parentElement as HTMLElement;
         }
-
-        // Set the active text style key if found
-        setActiveTextStyleKey(textStyleKey);
       }
+
+      // Use atomic state update to prevent transient null activeTextStyleKey
+      selectLayerWithSublayer(layerId, {
+        textStyleKey,
+        sublayerIndex: Number.isFinite(blockIndex) ? blockIndex : null,
+        listItemIndex: Number.isFinite(listItemIndex) ? listItemIndex : null,
+      });
     }
-  }, [isPreviewMode, setSelectedLayerId, setActiveSidebarTab, setActiveTextStyleKey]);
+  }, [isPreviewMode, setActiveSidebarTab, selectLayerWithSublayer]);
 
   const handleCanvasLayerUpdate = useCallback((layerId: string, updates: Partial<Layer>) => {
     if (editingComponentId) {
@@ -1066,6 +1080,18 @@ const CenterCanvas = React.memo(function CenterCanvas({
 
   const handleCanvasDeleteLayer = useCallback(() => {
     if (!selectedLayerId || !currentPageId) return;
+
+    // Handle sublayer deletion (remove TipTap block, not the whole layer)
+    if (activeSublayerIndex !== null) {
+      if (!currentDraft) return;
+      const richTextLayer = findLayerById(currentDraft.layers, selectedLayerId);
+      if (!richTextLayer) return;
+      const updates = removeRichTextSublayer(richTextLayer, activeSublayerIndex);
+      if (!updates) return;
+      updateLayer(currentPageId, selectedLayerId, updates);
+      setActiveSublayerIndex(null);
+      return;
+    }
 
     // Check if multi-select
     if (selectedLayerIds.length > 1) {
@@ -1090,7 +1116,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
         setSelectedLayerId(null);
       }
     }
-  }, [selectedLayerId, currentPageId, selectedLayerIds, currentDraft, deleteLayers, clearSelection, deleteLayer, setSelectedLayerId]);
+  }, [selectedLayerId, currentPageId, selectedLayerIds, currentDraft, deleteLayers, clearSelection, deleteLayer, setSelectedLayerId, activeSublayerIndex, setActiveSublayerIndex, updateLayer]);
 
   const handleCanvasGapUpdate = useCallback((layerId: string, gapValue: string) => {
     if (!currentPageId) return;
@@ -1849,35 +1875,37 @@ const CenterCanvas = React.memo(function CenterCanvas({
       {/* Text Editor Toolbar - shown when editing text */}
       {isTextEditing && !isPreviewMode && (
         <div className="absolute top-0 h-16.25 left-0 right-0 z-50 flex items-center justify-center gap-2 px-4 bg-background border-b">
-          {/* Heading/Paragraph Dropdown */}
-          <Select
-            value={
-              textEditorActiveMarks.headingLevel
-                ? `h${textEditorActiveMarks.headingLevel}`
-                : 'paragraph'
-            }
-            onValueChange={(value) => {
-              if (value === 'paragraph') {
-                setHeading(null);
-              } else {
-                const level = parseInt(value.replace('h', '')) as 1 | 2 | 3 | 4 | 5 | 6;
-                setHeading(level);
+          {/* Heading/Paragraph Dropdown - hidden for heading and text elements (they use the Tag selector in the sidebar) */}
+          {selectedLayerName !== 'heading' && selectedLayerName !== 'text' && (
+            <Select
+              value={
+                textEditorActiveMarks.headingLevel
+                  ? `h${textEditorActiveMarks.headingLevel}`
+                  : 'paragraph'
               }
-            }}
-          >
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="paragraph">Paragraph</SelectItem>
-              <SelectItem value="h1">Heading 1</SelectItem>
-              <SelectItem value="h2">Heading 2</SelectItem>
-              <SelectItem value="h3">Heading 3</SelectItem>
-              <SelectItem value="h4">Heading 4</SelectItem>
-              <SelectItem value="h5">Heading 5</SelectItem>
-              <SelectItem value="h6">Heading 6</SelectItem>
-            </SelectContent>
-          </Select>
+              onValueChange={(value) => {
+                if (value === 'paragraph') {
+                  setHeading(null);
+                } else {
+                  const level = parseInt(value.replace('h', '')) as 1 | 2 | 3 | 4 | 5 | 6;
+                  setHeading(level);
+                }
+              }}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="paragraph">Paragraph</SelectItem>
+                <SelectItem value="h1">Heading 1</SelectItem>
+                <SelectItem value="h2">Heading 2</SelectItem>
+                <SelectItem value="h3">Heading 3</SelectItem>
+                <SelectItem value="h4">Heading 4</SelectItem>
+                <SelectItem value="h5">Heading 5</SelectItem>
+                <SelectItem value="h6">Heading 6</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
 
           {/* Link Button */}
           {textEditor && (() => {
@@ -2028,37 +2056,6 @@ const CenterCanvas = React.memo(function CenterCanvas({
             </ToggleGroupItem>
           </ToggleGroup>
 
-          {/* Lists */}
-          <ToggleGroup
-            type="multiple"
-            size="xs"
-            variant="secondary"
-            spacing={1}
-          >
-            <ToggleGroupItem
-              value="bulletList"
-              data-state={textEditorActiveMarks.bulletList ? 'on' : 'off'}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                toggleBulletList();
-              }}
-              title="Bullet List"
-            >
-              <Icon name="listUnordered" className="size-3" />
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              value="orderedList"
-              data-state={textEditorActiveMarks.orderedList ? 'on' : 'off'}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                toggleOrderedList();
-              }}
-              title="Numbered List"
-            >
-              <Icon name="listOrdered" className="size-3" />
-            </ToggleGroupItem>
-          </ToggleGroup>
-
           {/* Inline Variable Button */}
           {hasFieldsMatching(fieldGroups, f => DISPLAYABLE_FIELD_TYPES.includes(f.type)) && (
             <ToggleGroup
@@ -2153,6 +2150,8 @@ const CenterCanvas = React.memo(function CenterCanvas({
             hoveredLayerId={hoveredLayerId}
             parentLayerId={parentLayerId}
             zoom={zoom}
+            activeSublayerIndex={activeSublayerIndex}
+            activeListItemIndex={activeListItemIndex}
           />
         )}
 

@@ -9,7 +9,7 @@ import { removeSpaces } from '@/lib/utils';
 import { setBreakpointClass, propertyToClass, buildBgImgVarName, buildBgImgClass } from '@/lib/tailwind-class-mapper';
 import { ASSET_CATEGORIES, isAssetOfType } from '@/lib/asset-utils';
 import { IMAGE_FIELD_TYPES, filterFieldGroupsByType, flattenFieldGroups } from '@/lib/collection-field-utils';
-import { getCollectionVariable } from '@/lib/layer-utils';
+import { getCollectionVariable, isTextContentLayer } from '@/lib/layer-utils';
 import {
   createAssetVariable,
   createDynamicTextVariable,
@@ -56,10 +56,7 @@ function removeVarEntry(vars: Record<string, string> | undefined, key: string): 
 /** Background image design properties that accompany the image URL */
 const BG_IMAGE_PROPS = ['backgroundImage', 'backgroundSize', 'backgroundPosition', 'backgroundRepeat'] as const;
 
-const isTextLayer = (layer: Layer | null): boolean => {
-  if (!layer) return false;
-  return layer.name === 'text';
-};
+const isTextLayer = isTextContentLayer;
 
 const BackgroundsControls = memo(function BackgroundsControls({ layer, onLayerUpdate, activeTextStyleKey, fieldGroups, allFields, collections }: BackgroundsControlsProps) {
   const { activeBreakpoint, activeUIState } = useEditorStore();

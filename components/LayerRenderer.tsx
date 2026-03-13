@@ -11,7 +11,7 @@ import { useLocalisationStore } from '@/stores/useLocalisationStore';
 import type { Layer, Locale, ComponentVariable, FormSettings, LinkSettings, Breakpoint, CollectionItemWithValues, Component } from '@/types';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
 import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-updates';
-import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextEditable, getCollectionVariable, evaluateVisibility, findAncestorByName, filterDisabledSliderLayers } from '@/lib/layer-utils';
+import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextEditable, isTextContentLayer, isRichTextLayer, getCollectionVariable, evaluateVisibility, findAncestorByName, filterDisabledSliderLayers, getLayerCmsFieldBinding } from '@/lib/layer-utils';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
 import { useCanvasSlider } from '@/hooks/use-canvas-slider';
 import { resolveFieldFromSources } from '@/lib/cms-variables-utils';
@@ -26,7 +26,7 @@ import { generateImageSrcset, getImageSizes, getOptimizedImageUrl } from '@/lib/
 import { useEditorStore } from '@/stores/useEditorStore';
 import { toast } from 'sonner';
 import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
-import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
+import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, flattenTiptapParagraphs, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
 import { hasComponentOrVariable } from '@/lib/tiptap-utils';
 import LayerContextMenu from '@/app/ycode/components/LayerContextMenu';
 import CanvasTextEditor from '@/app/ycode/components/CanvasTextEditor';
@@ -538,12 +538,14 @@ const LayerItem: React.FC<{
 
   let htmlTag = getLayerHtmlTag(layer);
 
+  const isSimpleTextLayer = isTextContentLayer(layer);
+
   // Check if we need to override the tag for rich text with block elements
   // Tags like <p>, <h1>-<h6> cannot contain block elements like <ul>/<ol>
   const textVariable = layer.variables?.text;
   let useSpanForParagraphs = false;
 
-  {
+  if (!isSimpleTextLayer) {
     const restrictiveBlockTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button'];
     const isRestrictiveTag = restrictiveBlockTags.includes(htmlTag);
 
@@ -858,7 +860,7 @@ const LayerItem: React.FC<{
       if (valueToRender !== undefined) {
         // Value is typed as ComponentVariableValue - check if it's a text variable (has 'type' property)
         if ('type' in valueToRender && valueToRender.type === 'dynamic_rich_text') {
-          return renderRichText(valueToRender as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds);
+          return renderRichText(valueToRender as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds, isSimpleTextLayer);
         }
         if ('type' in valueToRender && valueToRender.type === 'dynamic_text') {
           return (valueToRender as any).data.content;
@@ -871,9 +873,11 @@ const LayerItem: React.FC<{
 
     // Check for DynamicRichTextVariable format (with formatting)
     if (textVariable?.type === 'dynamic_rich_text') {
-      // Render rich text with formatting (bold, italic, etc.) and inline variables
-      // In edit mode, adds data-style attributes for style selection
-      return renderRichText(textVariable as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds);
+      // For heading/text elements, flatten multi-paragraph content into single paragraph with <br>
+      const variable = isSimpleTextLayer
+        ? { ...textVariable, data: { ...textVariable.data, content: flattenTiptapParagraphs(textVariable.data.content) } }
+        : textVariable;
+      return renderRichText(variable as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds, isSimpleTextLayer);
     }
 
     // Check for inline variables in DynamicTextVariable format (legacy)
@@ -1250,6 +1254,8 @@ const LayerItem: React.FC<{
     // Enable inline editing for text layers (both rich text and plain text)
     if (textEditable && isEditMode && !isLockedByOther) {
       setEditingLayerId(layer.id);
+      // Clear sublayer selection when entering edit mode
+      useEditorStore.getState().setActiveSublayerIndex(null);
       // Store click coordinates if provided
       if (typeof clickX === 'number' && typeof clickY === 'number') {
         setEditingClickCoords({ x: clickX, y: clickY });
@@ -1337,9 +1343,9 @@ const LayerItem: React.FC<{
   // Show projection indicator if this is being dragged over
   const showProjection = projected && activeLayerId && activeLayerId !== layer.id;
 
-  // Build className with editor states if in edit mode
-  // When layer tag is p and has text, add paragraph default classes (block, margin) so the wrapper displays correctly
-  const paragraphClasses = htmlTag === 'p' && layer.variables?.text
+  // For rich text elements, add paragraph default classes when tag is <p>
+  // Skip for heading/text — they render their own tag directly
+  const paragraphClasses = !isSimpleTextLayer && htmlTag === 'p' && layer.variables?.text
     ? getTextStyleClasses(layer.textStyles, 'paragraph')
     : '';
 
@@ -1555,6 +1561,7 @@ const LayerItem: React.FC<{
       'data-is-empty': isEmpty ? 'true' : 'false',
       ...(hasVisualStyle && { 'data-has-visual': 'true' }),
       ...(enableDragDrop && !isEditing && !isLockedByOther ? { ...normalizedAttributes, ...listeners } : normalizedAttributes),
+      ...(!isEditMode && { suppressHydrationWarning: true }),
     };
 
     // When a button is rendered as <a>, apply link attributes directly
@@ -1767,13 +1774,43 @@ const LayerItem: React.FC<{
         if (isLockedByOther) return;
         e.stopPropagation();
 
+        // Any element with CMS field binding: open collection item editor
+        const cmsBinding = getLayerCmsFieldBinding(layer);
+        if (cmsBinding) {
+          let targetCollectionId: string | null = null;
+          let targetItemId: string | undefined;
+
+          if (cmsBinding.source === 'collection' && cmsBinding.collection_layer_id && collectionItemId) {
+            const layerConfig = useCollectionLayerStore.getState().layerConfig;
+            targetCollectionId = layerConfig[cmsBinding.collection_layer_id]?.collectionId || null;
+            targetItemId = collectionItemId;
+          } else if (pageCollectionItemId) {
+            const currentPageId = useEditorStore.getState().currentPageId;
+            const currentPage = usePagesStore.getState().pages.find((p) => p.id === currentPageId);
+            targetCollectionId = currentPage?.settings?.cms?.collection_id || null;
+            targetItemId = pageCollectionItemId;
+          }
+
+          if (targetCollectionId && targetItemId) {
+            useEditorStore.getState().openCollectionItemSheet(targetCollectionId, targetItemId);
+            return;
+          }
+        }
+
         // Image layers: open file manager for quick image replacement
         if (layer.name === 'image' || htmlTag === 'img') {
           openImageFileManager();
           return;
         }
 
-        // Rich text with components or inline variables: open sheet editor instead of canvas editing
+        // RichText layers: always open sheet editor (block-level content needs full toolbar)
+        if (isRichTextLayer(layer)) {
+          useEditorStore.getState().setActiveSublayerIndex(null);
+          useEditorStore.getState().openRichTextSheet(layer.id);
+          return;
+        }
+
+        // Text/Heading with components or inline variables: open sheet editor
         if (textEditable) {
           const textVar = layer.variables?.text;
           const richContent = textVar?.type === 'dynamic_rich_text' ? textVar.data.content : null;
@@ -1783,7 +1820,7 @@ const LayerItem: React.FC<{
           }
         }
 
-        // Text-editable layers: start inline editing
+        // Text/Heading layers: start inline editing
         startEditing(e.clientX, e.clientY);
       };
       // Prevent context menu from bubbling

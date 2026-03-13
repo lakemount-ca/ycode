@@ -48,7 +48,7 @@ async function fetchCachedGlobalSettings() {
       globalCanonicalUrl: null,
       gaMeasurementId: null,
       publishedCss: null,
-      globalCustomCodeHead: null,
+      colorVariablesCss: null,
       globalCustomCodeBody: null,
       ycodeBadge: true,
       faviconUrl: null,
@@ -167,6 +167,7 @@ export default async function Home() {
       layers={data.pageLayers.layers || []}
       components={data.components}
       generatedCss={globalSettings.publishedCss || undefined}
+      colorVariablesCss={globalSettings.colorVariablesCss || undefined}
       locale={data.locale}
       availableLocales={data.availableLocales}
       translations={data.translations}

@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -56,6 +57,7 @@ import LinkSettings, { type LinkSettingsValue } from './LinkSettings';
 import ComponentInstanceSidebar from './ComponentInstanceSidebar';
 import ComponentVariableOverrides from './ComponentVariableOverrides';
 import ExpandableRichTextEditor from './ExpandableRichTextEditor';
+import RichTextEditor from './RichTextEditor';
 import ComponentVariableLabel, { VARIABLE_TYPE_ICONS } from './ComponentVariableLabel';
 import InteractionsPanel from './InteractionsPanel';
 import LayoutControls from './LayoutControls';
@@ -84,12 +86,12 @@ import { useLayerLocks } from '@/hooks/use-layer-locks';
 import { classesToDesign, mergeDesign, removeConflictsForClass, getRemovedPropertyClasses } from '@/lib/tailwind-class-mapper';
 import { cn } from '@/lib/utils';
 import { sanitizeHtmlId } from '@/lib/html-utils';
-import { isFieldVariable, getCollectionVariable, findParentCollectionLayer, findAllParentCollectionLayers, isTextEditable, findLayerWithParent, resetBindingsOnCollectionSourceChange, isInputInsideFilter, getLayerIndexes, indexedFindLayerById, indexedFindLayerWithParent, indexedFindParentCollectionLayer } from '@/lib/layer-utils';
+import { isFieldVariable, getCollectionVariable, findParentCollectionLayer, findAllParentCollectionLayers, isTextEditable, isTextContentLayer, isRichTextLayer, isHeadingLayer, findLayerWithParent, resetBindingsOnCollectionSourceChange, isInputInsideFilter, getLayerIndexes, indexedFindLayerById, indexedFindLayerWithParent, indexedFindParentCollectionLayer } from '@/lib/layer-utils';
 import { detachSpecificLayerFromComponent } from '@/lib/component-utils';
 import { convertContentToValue, parseValueToContent } from '@/lib/cms-variables-utils';
 import { createTextComponentVariableValue } from '@/lib/variable-utils';
-import { getRichTextValue } from '@/lib/tiptap-utils';
-import { DEFAULT_TEXT_STYLES, getTextStyle } from '@/lib/text-format-utils';
+import { getRichTextValue, extractPlainTextFromTiptap, getCmsFieldBinding } from '@/lib/tiptap-utils';
+import { DEFAULT_TEXT_STYLES, getTextStyle, getTiptapTextContent } from '@/lib/text-format-utils';
 import { buildFieldGroupsForLayer, getFieldIcon, isMultipleAssetField, MULTI_ASSET_COLLECTION_ID } from '@/lib/collection-field-utils';
 import { getInverseReferenceFields } from '@/lib/collection-utils';
 
@@ -391,14 +393,6 @@ const RightSidebar = React.memo(function RightSidebar({
     }
   }, [selectedLayerId]);
 
-  // Helper function to check if layer is a heading
-  const isHeadingLayer = (layer: Layer | null): boolean => {
-    if (!layer) return false;
-    const headingTags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'heading'];
-    return headingTags.includes(layer.name || '') ||
-           headingTags.includes(layer.settings?.tag || '');
-  };
-
   // Helper function to check if layer is a container/section/block
   const isContainerLayer = (layer: Layer | null): boolean => {
     if (!layer) return false;
@@ -411,11 +405,7 @@ const RightSidebar = React.memo(function RightSidebar({
            containerTags.includes(layer.settings?.tag || '');
   };
 
-  // Helper function to check if layer is a text element
-  const isTextLayer = (layer: Layer | null): boolean => {
-    if (!layer) return false;
-    return layer.name === 'text';
-  };
+  const isTextLayer = isTextContentLayer;
 
   // Helper function to check if layer is a button element
   const isButtonLayer = (layer: Layer | null): boolean => {
@@ -471,9 +461,9 @@ const RightSidebar = React.memo(function RightSidebar({
         return true;
 
       case 'typography':
-        // Typography controls: show in text edit mode or for text elements, buttons, icons, form inputs, body, and fraction
+        // Typography controls: show in text edit mode or for text elements, rich text, buttons, icons, form inputs, body, and fraction
         if (showTextStyleControls) return true;
-        return isTextLayer(layer) || isButtonLayer(layer) || isIconLayer(layer) || isFormInputLayer(layer) || layer.id === 'body' || layer.name === 'slideFraction';
+        return isTextLayer(layer) || isRichTextLayer(layer) || isButtonLayer(layer) || isIconLayer(layer) || isFormInputLayer(layer) || layer.id === 'body' || layer.name === 'slideFraction';
 
       case 'backgrounds':
         // Background controls: hide for text layers (image is in the color picker's image tab)
@@ -562,20 +552,25 @@ const RightSidebar = React.memo(function RightSidebar({
   const getDefaultTextTag = (layer: Layer | null): string => {
     if (!layer) return 'p';
     if (layer.settings?.tag) return layer.settings.tag;
-    return 'p'; // Default to p
+    if (layer.name === 'heading') return 'h2';
+    return 'p';
   };
 
-  // Text tag options with labels
+  // Tag options for heading elements (h1-h6)
+  const headingTagOptions = [
+    { value: 'h1', label: 'h1' },
+    { value: 'h2', label: 'h2' },
+    { value: 'h3', label: 'h3' },
+    { value: 'h4', label: 'h4' },
+    { value: 'h5', label: 'h5' },
+    { value: 'h6', label: 'h6' },
+  ] as const;
+
+  // Tag options for text elements (p, span, label)
   const textTagOptions = [
-    { value: 'h1', label: 'Heading 1' },
-    { value: 'h2', label: 'Heading 2' },
-    { value: 'h3', label: 'Heading 3' },
-    { value: 'h4', label: 'Heading 4' },
-    { value: 'h5', label: 'Heading 5' },
-    { value: 'h6', label: 'Heading 6' },
-    { value: 'p', label: 'Paragraph' },
-    { value: 'span', label: 'Span' },
-    { value: 'label', label: 'Label' },
+    { value: 'p', label: 'p' },
+    { value: 'span', label: 'span' },
+    { value: 'label', label: 'label' },
   ] as const;
 
   // Classes input state (synced with selectedLayer)
@@ -1716,12 +1711,13 @@ const RightSidebar = React.memo(function RightSidebar({
         {/* Design tab */}
         <TabsContent value="design" className="flex-1 flex flex-col divide-y overflow-y-auto no-scrollbar data-[state=inactive]:hidden overflow-x-hidden mt-0">
 
-          {/* Layer Styles Panel - only show for default layer style and not in text style mode */}
-          {!showTextStyleControls && (
+          {/* Layer Styles Panel - hide in text style mode except for richText sublayers */}
+          {(!showTextStyleControls || (selectedLayer && isRichTextLayer(selectedLayer))) && (
             <LayerStylesPanel
               layer={selectedLayer}
               pageId={currentPageId}
               onLayerUpdate={handleLayerUpdate}
+              activeTextStyleKey={selectedLayer && isRichTextLayer(selectedLayer) ? activeTextStyleKey : null}
             />
           )}
 
@@ -1910,36 +1906,39 @@ const RightSidebar = React.memo(function RightSidebar({
                 </div>
               )}
 
-              {/* Text Tag Selector - Only for text layers (not containers) */}
-              {selectedLayer?.name === 'text' && !isContainerLayer(selectedLayer) && (
-                <div className="grid grid-cols-3">
-                  <Label variant="muted">Tag</Label>
-                  <div className="col-span-2 *:w-full">
-                    <Select value={textTag} onValueChange={handleTextTagChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select...">
-                          {textTag && (() => {
-                            const option = textTagOptions.find(opt => opt.value === textTag);
-                            return option ? option.label : textTag;
-                          })()}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {textTagOptions.map((option) => (
-                            <SelectItem
-                              key={option.value}
-                              value={option.value}
-                            >
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
+              {/* Tag Selector - For heading and text layers */}
+              {(selectedLayer?.name === 'heading' || (selectedLayer?.name === 'text' && !isContainerLayer(selectedLayer))) && (() => {
+                const tagOptions = selectedLayer?.name === 'heading' ? headingTagOptions : textTagOptions;
+                return (
+                  <div className="grid grid-cols-3">
+                    <Label variant="muted">Tag</Label>
+                    <div className="col-span-2 *:w-full">
+                      <Select value={textTag} onValueChange={handleTextTagChange}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select...">
+                            {textTag && (() => {
+                              const option = tagOptions.find(opt => opt.value === textTag);
+                              return option ? option.label : textTag;
+                            })()}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {tagOptions.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Content Panel - show for text-editable layers */}
@@ -2033,24 +2032,69 @@ const RightSidebar = React.memo(function RightSidebar({
                           </div>
                         </Button>
                       ) : (isTextEditingOnCanvas && editingLayerIdOnCanvas === selectedLayerId) ? (
-                        // Don't render RichTextEditor while canvas text editor is active
-                        // to prevent race conditions when saving
                         <Empty className="min-h-8 py-2">
                           <EmptyDescription>You are editing the text directly on canvas.</EmptyDescription>
                         </Empty>
-                      ) : (
-                        <ExpandableRichTextEditor
+                      ) : isTextLayer(selectedLayer) ? (
+                        <RichTextEditor
                           key={selectedLayerId}
                           value={getContentValue(selectedLayer)}
                           onChange={handleContentChange}
                           placeholder="Enter text..."
-                          sheetDescription="Element content"
+                          withFormatting={true}
+                          showFormattingToolbar={false}
                           fieldGroups={fieldGroups}
                           allFields={fields}
                           collections={collections}
-                          disabled={showTextStyleControls}
                         />
-                      )}
+                      ) : (() => {
+                        const contentValue = getContentValue(selectedLayer);
+                        const cmsBinding = isRichTextLayer(selectedLayer) ? getCmsFieldBinding(contentValue) : null;
+
+                        if (cmsBinding) {
+                          return (
+                            <Button
+                              asChild
+                              variant="data"
+                              className="justify-between!"
+                            >
+                              <div>
+                                <span className="flex items-center gap-1.5 truncate">
+                                  <Icon name="database" className="size-3 opacity-60 shrink-0" />
+                                  <span className="truncate">{cmsBinding.label || 'CMS Field'}</span>
+                                </span>
+                                <Button
+                                  className="size-4! p-0! shrink-0"
+                                  variant="outline"
+                                  onClick={() => {
+                                    handleContentChange({
+                                      type: 'doc',
+                                      content: [{ type: 'paragraph' }],
+                                    });
+                                  }}
+                                >
+                                  <Icon name="x" className="size-2" />
+                                </Button>
+                              </div>
+                            </Button>
+                          );
+                        }
+
+                        return (
+                          <ExpandableRichTextEditor
+                            key={selectedLayerId}
+                            value={contentValue}
+                            onChange={handleContentChange}
+                            placeholder="Enter text..."
+                            sheetDescription="Element content"
+                            fieldGroups={fieldGroups}
+                            allFields={fields}
+                            collections={collections}
+                            disabled={showTextStyleControls}
+                            buttonOnly={isRichTextLayer(selectedLayer)}
+                          />
+                        );
+                      })()}
                     </div>
                   </div>
                 </SettingsPanel>
@@ -2058,7 +2102,7 @@ const RightSidebar = React.memo(function RightSidebar({
             })()}
 
             {/* Link Settings - hide for form-related layers, buttons inside forms, and layers inside buttons */}
-            {selectedLayer && !['form', 'select', 'input', 'textarea', 'checkbox', 'radio', 'label', 'lightbox', 'hr'].includes(selectedLayer.name) && selectedLayer.settings?.tag !== 'label' && !shouldHideLinkSettings && (
+            {selectedLayer && !['form', 'select', 'input', 'textarea', 'checkbox', 'radio', 'label', 'lightbox', 'hr', 'richText'].includes(selectedLayer.name) && selectedLayer.settings?.tag !== 'label' && !shouldHideLinkSettings && (
               <LinkSettings
                 layer={selectedLayer}
                 onLayerUpdate={handleLayerUpdate}

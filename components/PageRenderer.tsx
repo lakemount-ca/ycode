@@ -1,5 +1,6 @@
 import AnimationInitializer from '@/components/AnimationInitializer';
 import ContentHeightReporter from '@/components/ContentHeightReporter';
+import CustomCodeInjector from '@/components/CustomCodeInjector';
 import LayerRenderer from '@/components/LayerRenderer';
 import SliderInitializer from '@/components/SliderInitializer';
 import LightboxInitializer from '@/components/LightboxInitializer';
@@ -46,16 +47,17 @@ interface PageRendererProps {
   layers: Layer[];
   components: Component[];
   generatedCss?: string;
+  colorVariablesCss?: string;
   collectionItem?: CollectionItemWithValues;
   collectionFields?: CollectionField[];
   locale?: Locale | null;
   availableLocales?: Locale[];
-  isPreview?: boolean; // Whether we're in preview mode (use draft data)
-  translations?: Record<string, any> | null; // Translations for localized URL generation
-  gaMeasurementId?: string | null; // Google Analytics Measurement ID (pre-fetched)
-  globalCustomCodeBody?: string | null; // Global custom code for </body> (pre-fetched)
-  ycodeBadge?: boolean; // Whether to show the "Made in Ycode" badge
-  passwordProtection?: PasswordProtectionContext; // For 401 error pages - inject password form
+  isPreview?: boolean;
+  translations?: Record<string, any> | null;
+  gaMeasurementId?: string | null;
+  globalCustomCodeBody?: string | null;
+  ycodeBadge?: boolean;
+  passwordProtection?: PasswordProtectionContext;
 }
 
 /**
@@ -84,6 +86,7 @@ export default async function PageRenderer({
   layers,
   components,
   generatedCss,
+  colorVariablesCss,
   collectionItem,
   collectionFields = [],
   locale,
@@ -262,6 +265,14 @@ export default async function PageRenderer({
         />
       )}
 
+      {/* Inject color variable CSS custom properties */}
+      {colorVariablesCss && (
+        <style
+          id="ycode-color-vars"
+          dangerouslySetInnerHTML={{ __html: colorVariablesCss }}
+        />
+      )}
+
       {/* Load Google Fonts via <link> elements (more reliable than @import) */}
       {googleFontLinkUrls.map((url, i) => (
         <link
@@ -368,12 +379,12 @@ export default async function PageRenderer({
 
       {/* Inject global custom body code (applies to all pages) */}
       {globalCustomCodeBody && (
-        <div dangerouslySetInnerHTML={{ __html: globalCustomCodeBody }} />
+        <CustomCodeInjector html={globalCustomCodeBody} />
       )}
 
       {/* Inject page-specific custom body code */}
       {pageCustomCodeBody && (
-        <div dangerouslySetInnerHTML={{ __html: pageCustomCodeBody }} />
+        <CustomCodeInjector html={pageCustomCodeBody} />
       )}
 
       {/* Ycode badge (only on published pages, not in preview) */}
