@@ -13,7 +13,7 @@ import React, { useState, useCallback } from 'react';
 
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import SettingsPanel from './SettingsPanel';
 import type { Layer, CollectionPaginationConfig } from '@/types';
@@ -97,7 +97,7 @@ export default function CollectionPaginationSettings({
           <Label htmlFor="pagination-enabled" className="text-xs">
             Enable pagination
           </Label>
-          <Switch
+          <Checkbox
             id="pagination-enabled"
             checked={isEnabled}
             onCheckedChange={handleEnableChange}

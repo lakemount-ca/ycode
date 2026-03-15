@@ -44,8 +44,8 @@
   cursor: default !important;
 }
 
-/* Empty element styling (exclude void/form elements like input, select, textarea) */
-.ycode-layer:empty:not(input):not(select):not(textarea):not(img):not(br):not(hr)::before {
+/* Empty element styling (exclude void/form elements and layers with visible border/background) */
+.ycode-layer:empty:not(input):not(select):not(textarea):not(img):not(br):not(hr):not([data-has-visual])::before {
   content: ' ';
   display: block;
   background-color: rgb(191 219 254 / 0.1);

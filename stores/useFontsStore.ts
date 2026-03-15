@@ -9,10 +9,17 @@ import { create } from 'zustand';
 import { buildAllFontsCss, buildGoogleFontUrl, BUILT_IN_FONTS, getFontFamilyValue } from '@/lib/font-utils';
 import type { Font } from '@/types';
 
+interface GoogleFontAxis {
+  tag: string;
+  start: number;
+  end: number;
+}
+
 interface GoogleFontResult {
   family: string;
   variants: string[];
   category: string;
+  axes?: GoogleFontAxis[];
 }
 
 interface FontsState {
@@ -151,29 +158,45 @@ export const useFontsStore = create<FontsStore>((set, get) => ({
       const existing = get().fonts.find(f => f.name === slug);
       if (existing) return existing;
 
-      // Extract weights from variants
-      const weights = googleFont.variants
-        .map(v => {
-          if (v === 'regular') return '400';
-          if (v === 'italic') return null;
-          if (!isNaN(Number(v))) return v;
-          const numMatch = v.match(/^\d+/);
-          return numMatch ? numMatch[0] : null;
-        })
-        .filter((w): w is string => w !== null)
-        .filter((w, i, arr) => arr.indexOf(w) === i);
+      // Derive weights: use wght axis range for variable fonts, else parse variants
+      const wghtAxis = googleFont.axes?.find(a => a.tag === 'wght');
+      let weights: string[];
+
+      if (wghtAxis) {
+        weights = [];
+        for (let w = Math.max(wghtAxis.start, 100); w <= Math.min(wghtAxis.end, 900); w += 100) {
+          weights.push(String(w));
+        }
+      } else {
+        weights = googleFont.variants
+          .map(v => {
+            if (v === 'regular') return '400';
+            if (v === 'italic') return null;
+            if (!isNaN(Number(v))) return v;
+            const numMatch = v.match(/^\d+/);
+            return numMatch ? numMatch[0] : null;
+          })
+          .filter((w): w is string => w !== null)
+          .filter((w, i, arr) => arr.indexOf(w) === i);
+      }
+
+      const payload: Record<string, unknown> = {
+        name: slug,
+        family: googleFont.family,
+        type: 'google',
+        variants: googleFont.variants,
+        weights: weights.length > 0 ? weights : ['400', '700'],
+        category: googleFont.category,
+      };
+
+      if (googleFont.axes && googleFont.axes.length > 0) {
+        payload.axes = googleFont.axes;
+      }
 
       const response = await fetch('/ycode/api/fonts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: slug,
-          family: googleFont.family,
-          type: 'google',
-          variants: googleFont.variants,
-          weights: weights.length > 0 ? weights : ['400', '700'],
-          category: googleFont.category,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {

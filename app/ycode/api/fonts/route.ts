@@ -87,6 +87,7 @@ export async function POST(request: NextRequest) {
       variants: body.variants || [],
       weights: body.weights || ['400', '700'],
       category: body.category || '',
+      axes: body.axes || null,
     });
 
     return noCache({ data: font }, 201);

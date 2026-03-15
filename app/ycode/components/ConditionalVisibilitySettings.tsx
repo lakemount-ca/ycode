@@ -168,7 +168,7 @@ function ReferenceItemsSelector({
           className="w-full justify-between font-normal"
         >
           <span className="truncate text-xs">{getDisplayText()}</span>
-          <Icon name="chevronCombo" className="size-2.5 opacity-50 ml-2" />
+          <Icon name="chevronDown" className="size-2.5 opacity-50 ml-2" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-(--radix-dropdown-menu-trigger-width) min-w-50 max-h-60 overflow-y-auto" align="start">
@@ -205,8 +205,6 @@ export default function ConditionalVisibilitySettings({
   onLayerUpdate,
   fieldGroups,
 }: ConditionalVisibilitySettingsProps) {
-  const [isOpen, setIsOpen] = useState(false);
-
   // Derive flat list of fields from fieldGroups
   const allFieldsFromGroups = useMemo(() => flattenFieldGroups(fieldGroups), [fieldGroups]);
 
@@ -252,7 +250,10 @@ export default function ConditionalVisibilitySettings({
     });
   }, [layer, onLayerUpdate]);
 
-  if (!layer) {
+  const hasConditions = groups.length > 0;
+  const hasAvailableSources = allFieldsFromGroups.length > 0 || pageCollectionLayers.length > 0;
+
+  if (!layer || (!hasConditions && !hasAvailableSources)) {
     return null;
   }
 
@@ -568,15 +569,14 @@ export default function ConditionalVisibilitySettings({
             </div>
             <Label variant="muted" className="truncate">{displayName}</Label>
 
-            <div className="ml-auto -my-1 -mr-0.5 shrink-0">
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => handleRemoveCondition(group.id, condition.id)}
-              >
-                <Icon name="x" />
-              </Button>
-            </div>
+            <span
+              role="button"
+              tabIndex={0}
+              className="ml-auto -my-1 -mr-0.5 shrink-0 p-0.5 rounded-sm opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
+              onClick={() => handleRemoveCondition(group.id, condition.id)}
+            >
+              <Icon name="x" className="size-2.5" />
+            </span>
           </header>
 
           {/* Operator Select */}
@@ -585,7 +585,7 @@ export default function ConditionalVisibilitySettings({
             onValueChange={(value) => handleOperatorChange(group.id, condition.id, value as VisibilityOperator)}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Select a condition..." />
+              <SelectValue placeholder="Select..." />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
@@ -696,13 +696,12 @@ export default function ConditionalVisibilitySettings({
   return (
     <SettingsPanel
       title="Conditional visibility"
-      collapsible
-      isOpen={isOpen}
-      onToggle={() => setIsOpen(!isOpen)}
+      isOpen={hasConditions}
+      onToggle={() => {}}
       action={
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="secondary" size="xs">
+            <Button variant="ghost" size="xs">
               <Icon name="plus" />
             </Button>
           </DropdownMenuTrigger>
@@ -714,12 +713,7 @@ export default function ConditionalVisibilitySettings({
       }
     >
       <div className="flex flex-col gap-3">
-        {groups.length === 0 ? (
-          <div className="text-xs text-muted-foreground text-center py-4">
-            No conditions set. Click + to add a condition.
-          </div>
-        ) : (
-          groups.map((group, groupIndex) => (
+        {groups.map((group, groupIndex) => (
             <React.Fragment key={group.id}>
               {groupIndex > 0 && (
                 <div className="flex items-center gap-2 py-1">
@@ -757,8 +751,8 @@ export default function ConditionalVisibilitySettings({
                 </ul>
               </div>
             </React.Fragment>
-          ))
-        )}
+        ))
+        }
       </div>
     </SettingsPanel>
   );

@@ -1744,7 +1744,7 @@ export default function FileManagerDialog({
                           </>
                         )}
                       </span>
-                      <Icon name="chevronCombo" className="size-2.5 opacity-50 shrink-0" />
+                      <Icon name="chevronDown" className="size-2.5 opacity-50 shrink-0" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="min-w-35 w-auto p-1" align="start">

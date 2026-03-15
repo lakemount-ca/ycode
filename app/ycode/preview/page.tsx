@@ -2,10 +2,16 @@ import Link from 'next/link';
 import { fetchHomepage, fetchErrorPage } from '@/lib/page-fetcher';
 import PageRenderer from '@/components/PageRenderer';
 import PasswordForm from '@/components/PasswordForm';
-import { getSettingByKey } from '@/lib/repositories/settingsRepository';
+import { getSettingsByKeys } from '@/lib/repositories/settingsRepository';
+import { generateColorVariablesCss } from '@/lib/repositories/colorVariableRepository';
 import { generatePageMetadata } from '@/lib/generate-page-metadata';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
 import type { Metadata } from 'next';
+
+async function fetchPreviewDraftCss() {
+  const settings = await getSettingsByKeys(['draft_css']);
+  return (settings.draft_css as string) || undefined;
+}
 
 // Force dynamic rendering - no caching for preview
 export const dynamic = 'force-dynamic';
@@ -37,6 +43,12 @@ export default async function Home() {
     );
   }
 
+  // Fetch draft CSS and color variables
+  const [draftCSS, colorVariablesCss] = await Promise.all([
+    fetchPreviewDraftCss(),
+    generateColorVariablesCss(),
+  ]);
+
   // Check password protection for homepage (using all folders for preview)
   const folders = await fetchFoldersForAuth(false);
   const authCookie = await parseAuthCookie();
@@ -45,7 +57,6 @@ export default async function Home() {
   // If homepage is protected and not unlocked, show 401 error page
   if (protection.isProtected && !protection.isUnlocked) {
     const errorPageData = await fetchErrorPage(401, false);
-    const draftCSS = await getSettingByKey('draft_css');
 
     if (errorPageData) {
       const { page: errorPage, pageLayers: errorPageLayers, components: errorComponents } = errorPageData;
@@ -56,6 +67,7 @@ export default async function Home() {
           layers={errorPageLayers.layers || []}
           components={errorComponents}
           generatedCss={draftCSS}
+          colorVariablesCss={colorVariablesCss || undefined}
           isPreview={true}
           passwordProtection={{
             pageId: protection.protectedBy === 'page' ? protection.protectedById : undefined,
@@ -82,9 +94,6 @@ export default async function Home() {
     );
   }
 
-  // Load draft CSS from settings
-  const draftCSS = await getSettingByKey('draft_css');
-
   // Render homepage preview
   return (
     <PageRenderer
@@ -92,6 +101,7 @@ export default async function Home() {
       layers={data.pageLayers.layers || []}
       components={data.components}
       generatedCss={draftCSS}
+      colorVariablesCss={colorVariablesCss || undefined}
       locale={data.locale}
       availableLocales={data.availableLocales}
       isPreview={true}

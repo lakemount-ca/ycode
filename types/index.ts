@@ -153,6 +153,50 @@ export interface FormSettings {
   };
 }
 
+export type SwiperAnimationEffect = 'slide' | 'fade' | 'cube' | 'flip' | 'coverflow' | 'cards';
+export type SliderLoopMode = 'none' | 'loop' | 'rewind';
+export type SliderPaginationType = 'bullets' | 'fraction';
+export type LightboxOverlay = 'light' | 'dark';
+export type LightboxFilesSource = 'files' | 'cms';
+
+export interface LightboxSettings {
+  files: string[]; // Asset IDs or external URLs (used when filesSource is 'files')
+  filesSource: LightboxFilesSource; // Whether files come from manual selection or a CMS field
+  filesField?: FieldVariable | null; // CMS field binding for dynamic images (used when filesSource is 'cms')
+  thumbnails: boolean;
+  navigation: boolean;
+  pagination: boolean;
+  zoom: boolean; // Pinch-to-zoom on touch devices
+  doubleTapZoom: boolean; // Double-tap/click to zoom
+  mousewheel: boolean; // Navigate slides with scroll wheel
+  overlay: LightboxOverlay;
+  groupId: string; // Links multiple lightboxes into one shared gallery
+  animationEffect: SwiperAnimationEffect;
+  easing: string;
+  duration: string; // Transition duration in seconds
+}
+
+export interface SliderSettings {
+  navigation: boolean;
+  groupSlide: number;
+  slidesPerGroup: number;
+  loop: SliderLoopMode;
+  centered: boolean;
+  touchEvents: boolean;
+  slideToClicked: boolean;
+  mousewheel: boolean;
+
+  pagination: boolean;
+  paginationType: SliderPaginationType;
+  paginationClickable: boolean;
+  autoplay: boolean;
+  pauseOnHover: boolean;
+  delay: string; // Autoplay delay in seconds
+  animationEffect: SwiperAnimationEffect;
+  easing: string;
+  duration: string; // Transition duration in seconds
+}
+
 export interface LayerSettings {
   id?: string; // Custom element ID
   tag?: string; // HTML tag override (e.g., 'h1', 'h2', etc.)
@@ -164,6 +208,8 @@ export interface LayerSettings {
   htmlEmbed?: {
     code?: string; // Custom HTML code to embed
   };
+  slider?: SliderSettings; // Slider-specific settings (only for slider layers)
+  lightbox?: LightboxSettings; // Lightbox-specific settings (only for lightbox layers)
   form?: FormSettings; // Form-specific settings (only for form layers)
   filterOnChange?: boolean; // For filter layers: trigger filtering on every input change (debounced)
   optionsSource?: {
@@ -181,6 +227,7 @@ export interface LayerSettings {
 export interface LayerStyle {
   id: string;
   name: string;
+  group?: string; // Element category (e.g. "text", "block", "button") for scoped filtering
 
   // Style data
   classes: string;
@@ -241,6 +288,8 @@ export interface TextStyle {
   label?: string; // Display label for the style (e.g., "Bold", "Italic")
   classes?: string;
   design?: DesignProperties;
+  styleId?: string; // Layer style applied to this text style
+  styleOverrides?: { classes?: string; design?: DesignProperties };
 }
 
 export interface Layer {
@@ -985,6 +1034,16 @@ export interface Setting {
   updated_at: string;
 }
 
+// Color Variables
+export interface ColorVariable {
+  id: string;
+  name: string;
+  value: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface VariableType {
   id?: string; // Reference to ComponentVariable.id (for component variable linking)
   type: 'field' | 'asset' | 'video'  | 'dynamic_rich_text' | 'dynamic_text'| 'static_text';
@@ -1115,8 +1174,8 @@ export interface CollectionVariable {
   sort_order_inputLayerId?: string; // Linked filter input controlling sort_order at runtime
   limit?: number; // Maximum number of items to show (deprecated when pagination enabled)
   offset?: number; // Number of items to skip (deprecated when pagination enabled)
-  source_field_id?: string; // Field ID from parent item (reference or multi-asset field)
-  source_field_type?: 'reference' | 'multi_reference' | 'multi_asset'; // Type of source field
+  source_field_id?: string; // Field ID from parent item (reference or multi-asset field), or field ID on child collection (inverse_reference)
+  source_field_type?: 'reference' | 'multi_reference' | 'multi_asset' | 'inverse_reference'; // Type of source field
   source_field_source?: 'page' | 'collection'; // Source of the field (page data or collection layer)
   filters?: ConditionalVisibility; // Filter conditions to apply to collection items
   pagination?: CollectionPaginationConfig; // Pagination settings for collection
@@ -1348,6 +1407,12 @@ export interface FormSummary {
 // Font Types
 export type FontType = 'google' | 'custom' | 'default';
 
+export interface FontAxis {
+  tag: string;
+  start: number;
+  end: number;
+}
+
 export interface Font {
   id: string;
   name: string; // Slug-friendly name (e.g., "open-sans")
@@ -1356,6 +1421,7 @@ export interface Font {
   variants: string[]; // Available variants (e.g., ["regular", "italic", "700"])
   weights: string[]; // Available weights (e.g., ["400", "700"])
   category: string; // Font category (e.g., "sans-serif", "serif")
+  axes?: FontAxis[] | null; // Variable font axes (e.g., opsz, wdth)
   kind?: string | null; // Font format for custom fonts (e.g., "woff2", "truetype")
   url?: string | null; // Public URL for custom font file
   storage_path?: string | null; // Storage path for custom font file
@@ -1374,6 +1440,7 @@ export interface CreateFontData {
   variants: string[];
   weights: string[];
   category: string;
+  axes?: FontAxis[] | null;
   kind?: string | null;
   url?: string | null;
   storage_path?: string | null;

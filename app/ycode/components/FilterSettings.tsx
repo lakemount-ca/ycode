@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import SettingsPanel from './SettingsPanel';
 import type { Layer } from '@/types';
 
@@ -38,7 +38,7 @@ export default function FilterSettings({ layer, onLayerUpdate }: FilterSettingsP
     >
       <div className="flex items-center justify-between gap-2">
         <Label variant="muted">Filter on value change</Label>
-        <Switch
+        <Checkbox
           checked={filterOnChange}
           onCheckedChange={handleToggleFilterOnChange}
         />

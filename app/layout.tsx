@@ -14,15 +14,14 @@ export const metadata: Metadata = {
   description: 'Self-hosted visual website builder',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Dark mode is handled client-side by DarkModeProvider
-  // This avoids using headers() which would force all pages to be dynamic
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head />
       <body className={`${inter.variable} font-sans antialiased text-xs`} suppressHydrationWarning>
         <DarkModeProvider>
           {children}

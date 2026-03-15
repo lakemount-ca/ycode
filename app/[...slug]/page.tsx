@@ -193,6 +193,7 @@ async function fetchCachedGlobalSettings() {
       globalCanonicalUrl: null,
       gaMeasurementId: null,
       publishedCss: null,
+      colorVariablesCss: null,
       globalCustomCodeHead: null,
       globalCustomCodeBody: null,
       ycodeBadge: true,
@@ -219,18 +220,6 @@ async function fetchCachedErrorPage(errorCode: 401 | 404) {
     return await unstable_cache(
       async () => fetchErrorPage(errorCode, true),
       [`data-for-error-page-${errorCode}`],
-      { tags: ['all-pages'], revalidate: false }
-    )();
-  } catch {
-    return null;
-  }
-}
-
-async function fetchCachedPublishedCss() {
-  try {
-    return await unstable_cache(
-      async () => getSettingByKey('published_css'),
-      ['data-for-published-css'],
       { tags: ['all-pages'], revalidate: false }
     )();
   } catch {
@@ -267,20 +256,24 @@ export default async function Page({ params }: PageProps) {
   // Cache-first slug path; pagination is served through internal dynamic routes.
   const data = await fetchPublishedPageWithLayers(slugPath);
 
+  // Load all global settings early so error pages also get global custom code
+  const globalSettings = await fetchCachedGlobalSettings();
+
   // If page not found, try to show custom 404 error page
   if (!data) {
     const errorPageData = await fetchCachedErrorPage(404);
 
     if (errorPageData) {
-      const { page, pageLayers, components } = errorPageData;
-      const publishedCSS = await fetchCachedPublishedCss();
+      const { page: errorPage, pageLayers: errorPageLayers, components: errorComponents } = errorPageData;
 
       return (
         <PageRenderer
-          page={page}
-          layers={pageLayers.layers || []}
-          components={components}
-          generatedCss={publishedCSS}
+          page={errorPage}
+          layers={errorPageLayers.layers || []}
+          components={errorComponents}
+          generatedCss={globalSettings.publishedCss || undefined}
+          globalCustomCodeHead={globalSettings.globalCustomCodeHead}
+          globalCustomCodeBody={globalSettings.globalCustomCodeBody}
         />
       );
     }
@@ -304,24 +297,25 @@ export default async function Page({ params }: PageProps) {
     // If page is protected and not unlocked, show 401 error page
     if (!protection.isUnlocked) {
       const errorPageData = await fetchCachedErrorPage(401);
-      const publishedCSS = await fetchCachedPublishedCss();
 
       if (errorPageData) {
         const { page: errorPage, pageLayers: errorPageLayers, components: errorComponents } = errorPageData;
 
         return (
-        <PageRenderer
-          page={errorPage}
-          layers={errorPageLayers.layers || []}
-          components={errorComponents}
-          generatedCss={publishedCSS}
-          passwordProtection={{
-            pageId: protection.protectedBy === 'page' ? protection.protectedById : undefined,
-            folderId: protection.protectedBy === 'folder' ? protection.protectedById : undefined,
-            redirectUrl: currentPath,
-            isPublished: true,
-          }}
-        />
+          <PageRenderer
+            page={errorPage}
+            layers={errorPageLayers.layers || []}
+            components={errorComponents}
+            generatedCss={globalSettings.publishedCss || undefined}
+            globalCustomCodeHead={globalSettings.globalCustomCodeHead}
+            globalCustomCodeBody={globalSettings.globalCustomCodeBody}
+            passwordProtection={{
+              pageId: protection.protectedBy === 'page' ? protection.protectedById : undefined,
+              folderId: protection.protectedBy === 'folder' ? protection.protectedById : undefined,
+              redirectUrl: currentPath,
+              isPublished: true,
+            }}
+          />
         );
       }
 
@@ -344,15 +338,13 @@ export default async function Page({ params }: PageProps) {
     }
   }
 
-  // Load all global settings in a single query
-  const globalSettings = await fetchCachedGlobalSettings();
-
   return (
     <PageRenderer
       page={page}
       layers={pageLayers.layers || []}
       components={components}
       generatedCss={globalSettings.publishedCss || undefined}
+      colorVariablesCss={globalSettings.colorVariablesCss || undefined}
       collectionItem={collectionItem}
       collectionFields={collectionFields}
       locale={locale}

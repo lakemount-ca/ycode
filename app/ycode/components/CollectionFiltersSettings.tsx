@@ -165,7 +165,7 @@ function ReferenceItemsSelector({
           className="w-full justify-between font-normal"
         >
           <span className="truncate text-xs">{getDisplayText()}</span>
-          <Icon name="chevronCombo" className="size-2.5 opacity-50 ml-2" />
+          <Icon name="chevronDown" className="size-2.5 opacity-50 ml-2" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-(--radix-dropdown-menu-trigger-width) min-w-50 max-h-60 overflow-y-auto" align="start">
@@ -521,15 +521,14 @@ export default function CollectionFiltersSettings({
             </div>
             <Label variant="muted" className="truncate">{displayName}</Label>
 
-            <div className="ml-auto -my-1 -mr-0.5 shrink-0">
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => handleRemoveCondition(group.id, condition.id)}
-              >
-                <Icon name="x" />
-              </Button>
-            </div>
+            <span
+              role="button"
+              tabIndex={0}
+              className="ml-auto -my-1 -mr-0.5 shrink-0 p-0.5 rounded-sm opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
+              onClick={() => handleRemoveCondition(group.id, condition.id)}
+            >
+              <Icon name="x" className="size-2.5" />
+            </span>
           </header>
 
           {/* Operator Select */}
@@ -538,7 +537,7 @@ export default function CollectionFiltersSettings({
             onValueChange={(value) => handleOperatorChange(group.id, condition.id, value as VisibilityOperator)}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Select a condition..." />
+              <SelectValue placeholder="Select..." />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>

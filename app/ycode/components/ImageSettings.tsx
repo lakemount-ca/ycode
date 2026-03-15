@@ -21,7 +21,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -506,7 +506,7 @@ export default function ImageSettings(props: ImageSettingsProps) {
               collections={collections || []}
               value={selectedField || currentFieldId}
               onSelect={handleFieldSelect}
-              placeholder="Select a field"
+              placeholder="Select..."
               allowedFieldTypes={IMAGE_FIELD_TYPES}
             />
           </div>
@@ -589,9 +589,9 @@ export default function ImageSettings(props: ImageSettingsProps) {
         )}
         {isStandaloneMode && <Label variant="muted" className="mb-1.5">Behavior</Label>}
 
-        <div className={isStandaloneMode ? 'flex flex-col gap-3' : 'col-span-2 flex flex-col gap-3'}>
+        <div className={isStandaloneMode ? 'flex flex-col gap-2' : 'col-span-2 flex flex-col gap-2'}>
           <div className="flex items-center gap-2">
-            <Switch
+            <Checkbox
               id="image-lazy"
               checked={lazyValue}
               onCheckedChange={handleLazyChange}

@@ -976,7 +976,7 @@ export default function SelectOptionsSettings({
                               : `${sortByFieldIds.length} field${sortByFieldIds.length > 1 ? 's' : ''} selected`}
                           </span>
                           <div className="ml-2">
-                            <Icon name="chevronCombo" className="size-2.5 opacity-50" />
+                            <Icon name="chevronDown" className="size-2.5 opacity-50" />
                           </div>
                         </Button>
                       </DropdownMenuTrigger>

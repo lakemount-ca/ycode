@@ -1,19 +1,20 @@
 import * as React from 'react'
-import { ChevronUp, ChevronDown } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
+import { Icon } from '@/components/ui/icon'
 
 interface InputProps extends Omit<React.ComponentProps<'input'>, 'size'> {
   size?: 'xs' | 'sm';
+  variant?: 'default' | 'rename' | 'rename-selected';
   stepper?: boolean;
   onStepperChange?: (value: string) => void;
 }
 
-function Input({
+const Input = React.forwardRef<HTMLInputElement, InputProps>(function Input({
   className,
   type,
   size = 'xs',
+  variant = 'default',
   onKeyDown,
   value,
   onChange,
@@ -23,8 +24,9 @@ function Input({
   max,
   step = '1',
   ...props
-}: InputProps) {
-  const inputRef = React.useRef<HTMLInputElement>(null);
+}, forwardedRef) {
+  const internalRef = React.useRef<HTMLInputElement>(null);
+  const inputRef = (forwardedRef || internalRef) as React.RefObject<HTMLInputElement>;
   const sizeClasses = {
     xs: 'h-8 text-xs px-2 py-1 rounded-lg',
     sm: 'h-10 text-sm px-3 py-1.5 rounded-xl',
@@ -144,28 +146,24 @@ function Input({
           {...props}
         />
         {!props.disabled && (
-          <div className="absolute right-px top-px bottom-px items-center rounded-r-[10px] bg-gradient-to-l from-input backdrop-blur hidden group-hover:flex pr-1.5">
-            <div className="flex flex-col">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
+          <div className="absolute right-px top-px bottom-px items-center rounded-r-[10px] hidden group-hover:flex px-1.5">
+            <div className="flex flex-col -gap-px">
+              <span
+                role="button"
+                tabIndex={-1}
+                className="p-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
                 onClick={handleIncrement}
-                className="size-2.5 h-3.5 w-4"
-                tabIndex={-1}
               >
-                <ChevronUp className="size-2.5" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
+                <Icon name="chevronUp" className="size-2.5" />
+              </span>
+              <span
+                role="button"
+                tabIndex={-1}
+                className="p-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer -mt-0.5"
                 onClick={handleDecrement}
-                className="size-2.5 h-3.5 w-4"
-                tabIndex={-1}
               >
-                <ChevronDown className="size-2.5" />
-              </Button>
+                <Icon name="chevronDown" className="size-2.5" />
+              </span>
             </div>
           </div>
         )}
@@ -173,25 +171,30 @@ function Input({
     );
   }
 
+  const variantClasses = {
+    default: cn(
+      'file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground bg-input border-transparent w-full min-w-0 border transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:font-medium disabled:cursor-not-allowed disabled:opacity-50',
+      'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[0px]',
+      'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
+      '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none',
+      sizeClasses[size],
+    ),
+    rename: 'bg-black/5 dark:bg-white/10 rounded px-1 py-0.5 outline-none min-w-0 text-xs font-medium text-foreground placeholder:text-muted-foreground',
+    'rename-selected': 'bg-white/20 rounded px-1 py-0.5 outline-none min-w-0 text-xs font-medium text-white placeholder:text-white/40',
+  };
+
   return (
     <input
       ref={inputRef}
       type={type}
       data-slot="input"
-      className={cn(
-        'file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground bg-input border-transparent w-full min-w-0 border transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:font-medium disabled:cursor-not-allowed disabled:opacity-50',
-        'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[0px]',
-        '',
-        'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-        sizeClasses[size],
-        className
-      )}
+      className={cn(variantClasses[variant], className)}
       value={value}
       onChange={onChange}
       onKeyDown={handleKeyDown}
       {...props}
     />
   )
-}
+});
 
 export { Input }

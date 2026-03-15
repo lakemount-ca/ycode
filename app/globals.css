@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant current (&[aria-current]);
+@custom-variant disabled (&:is(:disabled, [aria-disabled]));
 
 @theme inline {
   --color-background: var(--background);

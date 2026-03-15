@@ -1,24 +1,31 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback, memo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import Icon from '@/components/ui/icon';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDesignSync } from '@/hooks/use-design-sync';
 import { useControlledInputs } from '@/hooks/use-controlled-input';
 import { useModeToggle } from '@/hooks/use-mode-toggle';
 import { useEditorStore } from '@/stores/useEditorStore';
+import { useColorVariablesStore } from '@/stores/useColorVariablesStore';
 import { extractMeasurementValue } from '@/lib/measurement-utils';
-import { removeSpaces } from '@/lib/utils';
+import { cn, removeSpaces } from '@/lib/utils';
 import ColorPropertyField from '@/app/ycode/components/ColorPropertyField';
 import type { Collection, CollectionField, Layer } from '@/types';
 import type { FieldGroup } from '@/lib/collection-field-utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface BorderControlsProps {
   layer: Layer | null;
@@ -29,8 +36,39 @@ interface BorderControlsProps {
   collections?: Collection[];
 }
 
-export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKey, fieldGroups, allFields, collections }: BorderControlsProps) {
+function hexToRgba(value: string): string {
+  const parts = value.split('/');
+  if (parts.length < 2) return value;
+  const hex = parts[0];
+  const opacity = parseInt(parts[1]) / 100;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${opacity})`;
+}
+
+function parseBorderColorToCss(color: string, colorVariables?: import('@/types').ColorVariable[]): string {
+  if (!color) return '#000000';
+  const varMatch = color.match(/^color:var\(--(.+)\)$/);
+  if (varMatch && colorVariables) {
+    const variable = colorVariables.find((v) => v.id === varMatch[1]);
+    return variable ? hexToRgba(variable.value) : '#000000';
+  }
+  const match = color.match(/^(#[0-9a-fA-F]{6})\/(\d+)$/);
+  if (match) {
+    const hex = match[1];
+    const a = parseInt(match[2]) / 100;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  return color;
+}
+
+const BorderControls = memo(function BorderControls({ layer, onLayerUpdate, activeTextStyleKey, fieldGroups, allFields, collections }: BorderControlsProps) {
   const { activeBreakpoint, activeUIState } = useEditorStore();
+  const colorVariables = useColorVariablesStore((s) => s.colorVariables);
   const { updateDesignProperty, updateDesignProperties, debouncedUpdateDesignProperty, getDesignProperty } = useDesignSync({
     layer,
     onLayerUpdate,
@@ -52,11 +90,6 @@ export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKe
   const borderLeftWidth = getDesignProperty('borders', 'borderLeftWidth') || '';
   const borderStyle = getDesignProperty('borders', 'borderStyle') || 'solid';
   const borderColor = getDesignProperty('borders', 'borderColor') || '';
-  const divideX = getDesignProperty('borders', 'divideX') || '';
-  const divideY = getDesignProperty('borders', 'divideY') || '';
-  const divideStyle = getDesignProperty('borders', 'divideStyle') || 'solid';
-  const divideColor = getDesignProperty('borders', 'divideColor') || '';
-
   // Check for border existence from both class-based values AND design object
   // This ensures backwards compatibility with layers that have design properties but missing classes
   const designBorders = layer?.design?.borders;
@@ -65,7 +98,12 @@ export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKe
     designBorders?.borderWidth || designBorders?.borderTopWidth || designBorders?.borderRightWidth ||
     designBorders?.borderBottomWidth || designBorders?.borderLeftWidth
   );
-  const hasDivider = !!(divideX || divideY || designBorders?.divideX || designBorders?.divideY);
+
+  const divideX = getDesignProperty('borders', 'divideX') || '';
+  const divideY = getDesignProperty('borders', 'divideY') || '';
+  const divideStyle = getDesignProperty('borders', 'divideStyle') || 'solid';
+  const divideColor = getDesignProperty('borders', 'divideColor') || '';
+  const hasDivider = !!(divideX || divideY || divideColor || designBorders?.divideX || designBorders?.divideY || designBorders?.divideColor);
 
   // Local controlled inputs (prevents repopulation bug)
   const inputs = useControlledInputs({
@@ -101,22 +139,22 @@ export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKe
     category: 'borders',
     unifiedProperty: 'borderRadius',
     individualProperties: ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'],
-    modeProperty: 'borderRadiusMode', // Store the mode preference in layer JSON
+    modeProperty: 'borderRadiusMode',
     updateDesignProperty,
     updateDesignProperties,
-    // Don't wrap in useCallback - let it recreate on every render to avoid stale closures
     getCurrentValue: (prop: string) => getDesignProperty('borders', prop) || '',
+    getStoredMode: () => (layer?.design?.borders as Record<string, unknown>)?.borderRadiusMode as 'all' | 'individual' | null,
   });
 
   const widthModeToggle = useModeToggle({
     category: 'borders',
     unifiedProperty: 'borderWidth',
     individualProperties: ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'],
-    modeProperty: 'borderWidthMode', // Store the mode preference in layer JSON
+    modeProperty: 'borderWidthMode',
     updateDesignProperty,
     updateDesignProperties,
-    // Don't wrap in useCallback - let it recreate on every render to avoid stale closures
     getCurrentValue: (prop: string) => getDesignProperty('borders', prop) || '',
+    getStoredMode: () => (layer?.design?.borders as Record<string, unknown>)?.borderWidthMode as 'all' | 'individual' | null,
   });
 
   // Handle radius changes (debounced for text input)
@@ -216,7 +254,6 @@ export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKe
     ]);
   };
 
-  // Handle divider changes (debounced for text input)
   const handleDivideXChange = (value: string) => {
     setDivideXInput(value);
     const sanitized = removeSpaces(value);
@@ -229,33 +266,28 @@ export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKe
     debouncedUpdateDesignProperty('borders', 'divideY', sanitized || null);
   };
 
-  // Handle divider style change (immediate - dropdown selection)
   const handleDivideStyleChange = (value: string) => {
     updateDesignProperty('borders', 'divideStyle', value);
   };
 
-  // Debounced handler for keyboard-typed hex values
   const handleDivideColorChange = (value: string) => {
     const sanitized = removeSpaces(value);
     debouncedUpdateDesignProperty('borders', 'divideColor', sanitized || null);
   };
 
-  // Immediate handler for programmatic changes
   const handleDivideColorImmediate = (value: string) => {
     const sanitized = removeSpaces(value);
     updateDesignProperty('borders', 'divideColor', sanitized || null);
   };
 
-  // Add divider (default to vertical)
   const handleAddDivider = () => {
     updateDesignProperties([
-      { category: 'borders', property: 'divideY', value: '1px' },
+      { category: 'borders', property: 'divideY', value: '[1px]' },
       { category: 'borders', property: 'divideStyle', value: 'solid' },
       { category: 'borders', property: 'divideColor', value: '#000000' },
     ]);
   };
 
-  // Remove divider
   const handleRemoveDivider = () => {
     updateDesignProperties([
       { category: 'borders', property: 'divideX', value: null },
@@ -267,8 +299,23 @@ export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKe
 
   return (
     <div className="py-5">
-      <header className="py-4 -mt-4">
+      <header className="py-4 -mt-4 flex items-center justify-between">
         <Label>Borders</Label>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="xs">
+              <Icon name="plus" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={handleAddDivider}
+              disabled={hasDivider}
+            >
+              Dividers
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       <div className="flex flex-col gap-2">
@@ -361,31 +408,41 @@ export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKe
               <PopoverTrigger asChild>
                 {!hasBorder ? (
                   <Button
+                    variant="input"
                     size="sm"
-                    variant="secondary"
-                    className="w-full"
+                    className="justify-start w-full"
                     onClick={handleAddBorder}
                   >
-                    <Icon name="plus" />
-                    Add
+                      <div className="size-5 rounded-[6px] shrink-0 -ml-1 relative overflow-hidden outline outline-current/10 outline-offset-[-1px]">
+                        <div className="absolute inset-0 opacity-15 bg-checkerboard bg-background z-10" />
+                      </div>
+                      <span className="dark:opacity-50">Add...</span>
                   </Button>
                 ) : (
-                  <InputGroup>
-                    <div className="w-full flex items-center justify-between gap-1 px-2.5">
+                  <Button
+                    variant="input"
+                    size="sm"
+                    className="justify-start w-full"
+                  >
                       <div className="flex items-center gap-2">
-                      <div className="size-4 rounded shrink-0" style={{ backgroundColor: borderColor || '#000000' }} />
+                        <div className="size-5 rounded-[6px] shrink-0 -ml-1 relative overflow-hidden outline dark:outline-white/10 outline-offset-[-1px]">
+                          <div className="absolute inset-0 z-20" style={{ background: parseBorderColorToCss(borderColor, colorVariables) }} />
+                          <div className="absolute inset-0 opacity-15 bg-checkerboard bg-background z-10" />
+                        </div>
                         <Label variant="muted" className="capitalize">{borderStyle || 'Solid'}</Label>
                       </div>
-                      <Button
-                        size="xs"
-                        className="-mr-1.5"
-                        variant="ghost"
-                        onClick={handleRemoveBorder}
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className="ml-auto -mr-0.5 p-0.5 rounded-sm opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveBorder();
+                        }}
                       >
-                        <Icon name="x" />
-                      </Button>
-                    </div>
-                  </InputGroup>
+                        <Icon name="x" className="size-2.5" />
+                      </span>
+                  </Button>
                 )}
               </PopoverTrigger>
 
@@ -508,142 +565,124 @@ export default function BorderControls({ layer, onLayerUpdate, activeTextStyleKe
           </div>
         </div>
 
-        <div className="grid grid-cols-3 items-start">
-          <Label variant="muted" className="h-8">Dividers</Label>
-          <div className="col-span-2">
-            <Popover>
-              <PopoverTrigger asChild>
-                {!hasDivider ? (
+        {hasDivider && (
+          <div className="grid grid-cols-3 items-start">
+            <Label variant="muted" className="h-8">Dividers</Label>
+            <div className="col-span-2 flex items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
                   <Button
+                    variant="input"
                     size="sm"
-                    variant="secondary"
-                    className="w-full"
-                    onClick={handleAddDivider}
+                    className="justify-start flex-1"
                   >
-                    <Icon name="plus" />
-                    Add
+                    <Label variant="muted" className="capitalize cursor-pointer">{divideStyle || 'Solid'}</Label>
                   </Button>
-                ) : (
-                  <InputGroup>
-                    <div className="w-full flex items-center justify-between gap-1 px-2.5">
-                      <div className="flex items-center gap-2">
-                        <div className="size-4 rounded shrink-0" style={{ backgroundColor: divideColor || '#000000' }} />
-                        <Label variant="muted" className="capitalize">{divideStyle || 'Solid'}</Label>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 mr-4">
+                  <div className="flex flex-col gap-2">
+                    <div className="grid grid-cols-3 items-start">
+                      <Label variant="muted" className="h-8">Width</Label>
+                      <div className="col-span-2 grid grid-cols-2 gap-2">
+                        <InputGroup>
+                          <InputGroupAddon>
+                            <div className="flex">
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <Icon name="maxSize" className="size-3 rotate-90" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Vertical</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </InputGroupAddon>
+                          <InputGroupInput
+                            stepper
+                            min="0"
+                            step="1"
+                            value={divideYInput}
+                            onChange={(e) => handleDivideYChange(e.target.value)}
+                            placeholder="0"
+                          />
+                        </InputGroup>
+                        <InputGroup>
+                          <InputGroupAddon>
+                            <div className="flex">
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <Icon name="maxSize" className="size-3" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Horizontal</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </InputGroupAddon>
+                          <InputGroupInput
+                            stepper
+                            min="0"
+                            step="1"
+                            value={divideXInput}
+                            onChange={(e) => handleDivideXChange(e.target.value)}
+                            placeholder="0"
+                          />
+                        </InputGroup>
                       </div>
-                      <Button
-                        size="xs"
-                        className="-mr-1.5"
-                        variant="ghost"
-                        onClick={handleRemoveDivider}
-                      >
-                        <Icon name="x" />
-                      </Button>
                     </div>
-                  </InputGroup>
-                )}
-              </PopoverTrigger>
-
-              <PopoverContent className="w-64 mr-4">
-                <div className="flex flex-col gap-2">
-                  <div className="grid grid-cols-3 items-start">
-                    <Label variant="muted" className="h-8">Width</Label>
-                    <div className="col-span-2 grid grid-cols-2 gap-2">
-
-                      <InputGroup>
-                        <InputGroupAddon>
-                          <div className="flex">
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <Icon name="maxSize" className="size-3 rotate-90" />
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Vertical</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          stepper
-                          min="0"
-                          step="1"
-                          value={divideYInput}
-                          onChange={(e) => handleDivideYChange(e.target.value)}
-                          placeholder="1"
+                    <div className="grid grid-cols-3">
+                      <Label variant="muted">Style</Label>
+                      <div className="col-span-2 *:w-full">
+                        <Select value={divideStyle} onValueChange={handleDivideStyleChange}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value="solid">Solid</SelectItem>
+                              <SelectItem value="dashed">Dashed</SelectItem>
+                              <SelectItem value="dotted">Dotted</SelectItem>
+                              <SelectItem value="double">Double</SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3">
+                      <Label variant="muted">Color</Label>
+                      <div className="col-span-2 *:w-full">
+                        <ColorPropertyField
+                          solidOnly
+                          value={divideColor || '#000000'}
+                          onChange={handleDivideColorChange}
+                          onImmediateChange={handleDivideColorImmediate}
+                          layer={layer}
+                          onLayerUpdate={onLayerUpdate}
+                          designProperty="divideColor"
+                          fieldGroups={fieldGroups}
+                          allFields={allFields}
+                          collections={collections}
                         />
-                      </InputGroup>
-
-                      <InputGroup>
-                        <InputGroupAddon>
-                          <div className="flex">
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <Icon name="maxSize" className="size-3" />
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Horizontal</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          stepper
-                          min="0"
-                          step="1"
-                          value={divideXInput}
-                          onChange={(e) => handleDivideXChange(e.target.value)}
-                          placeholder="1"
-                        />
-                      </InputGroup>
-
+                      </div>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-3">
-                    <Label variant="muted">Style</Label>
-                    <div className="col-span-2 *:w-full">
-                      <Select value={divideStyle} onValueChange={handleDivideStyleChange}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectItem value="solid">Solid</SelectItem>
-                            <SelectItem value="dashed">Dashed</SelectItem>
-                            <SelectItem value="dotted">Dotted</SelectItem>
-                            <SelectItem value="double">Double</SelectItem>
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3">
-                    <Label variant="muted">Color</Label>
-                    <div className="col-span-2 *:w-full">
-                      <ColorPropertyField
-                        solidOnly
-                        value={divideColor || '#000000'}
-                        onChange={handleDivideColorChange}
-                        onImmediateChange={handleDivideColorImmediate}
-                        layer={layer}
-                        onLayerUpdate={onLayerUpdate}
-                        designProperty="divideColor"
-                        fieldGroups={fieldGroups}
-                        allFields={allFields}
-                        collections={collections}
-                      />
-                    </div>
-                  </div>
-
-                </div>
-
-              </PopoverContent>
-            </Popover>
+                </PopoverContent>
+              </Popover>
+              <span
+                role="button"
+                tabIndex={0}
+                className="p-0.5 rounded-sm opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
+                onClick={handleRemoveDivider}
+              >
+                <Icon name="x" className="size-2.5" />
+              </span>
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
 
     </div>
   );
-}
+});
+export default BorderControls;

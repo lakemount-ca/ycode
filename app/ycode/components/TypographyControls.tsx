@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
@@ -18,10 +18,14 @@ import { useFontsStore } from '@/stores/useFontsStore';
 import { extractMeasurementValue } from '@/lib/measurement-utils';
 import { removeSpaces } from '@/lib/utils';
 import { getFontAvailableWeights, FONT_WEIGHTS } from '@/lib/font-utils';
+import { buildBgImgVarName } from '@/lib/tailwind-class-mapper';
+import { isTextContentLayer } from '@/lib/layer-utils';
 import type { Collection, CollectionField, Layer } from '@/types';
 import type { FieldGroup } from '@/lib/collection-field-utils';
 import ColorPropertyField from './ColorPropertyField';
 import FontPicker from './FontPicker';
+import TextBackgroundImageTab from './TextBackgroundImageTab';
+import type { TextBackgroundImageTabHandle } from './TextBackgroundImageTab';
 
 interface TypographyControlsProps {
   layer: Layer | null;
@@ -32,7 +36,7 @@ interface TypographyControlsProps {
   collections?: Collection[];
 }
 
-export default function TypographyControls({ layer, onLayerUpdate, activeTextStyleKey, fieldGroups, allFields, collections }: TypographyControlsProps) {
+const TypographyControls = memo(function TypographyControls({ layer, onLayerUpdate, activeTextStyleKey, fieldGroups, allFields, collections }: TypographyControlsProps) {
   const { activeBreakpoint, activeUIState } = useEditorStore();
   const showTextStyleControls = useEditorStore((state) => state.showTextStyleControls());
   const { updateDesignProperty, updateDesignProperties, debouncedUpdateDesignProperty, getDesignProperty } = useDesignSync({
@@ -229,8 +233,31 @@ export default function TypographyControls({ layer, onLayerUpdate, activeTextSty
     debouncedUpdateDesignProperty('typography', 'underlineOffset', sanitized || null);
   };
 
-  // Check if the layer is an icon
+  // Check if the layer is an icon or text-content element
   const isIcon = layer?.name === 'icon';
+  const isText = isTextContentLayer(layer);
+
+  const bgImageRef = useRef<TextBackgroundImageTabHandle>(null);
+  const handleImageActivate = useCallback(() => bgImageRef.current?.activate(), []);
+  const handleImageDeactivate = useCallback((solidColor: string) => bgImageRef.current?.deactivate(solidColor), []);
+
+  const bgImageSrc = layer?.variables?.backgroundImage?.src;
+  const textImagePreviewUrl = useMemo(() => {
+    if (!isText) return undefined;
+    const varName = buildBgImgVarName(activeBreakpoint, activeUIState);
+    const raw = layer?.design?.backgrounds?.bgImageVars?.[varName] || '';
+    if (!raw) return undefined;
+    const url = raw.startsWith('url(') ? raw.slice(4, -1).replace(/['"]/g, '') : raw;
+    return url || undefined;
+  }, [isText, layer?.design?.backgrounds?.bgImageVars, activeBreakpoint, activeUIState]);
+
+  const textImageLabel = useMemo(() => {
+    if (!isText || !bgImageSrc) return undefined;
+    if (bgImageSrc.type === 'asset') return 'File manager';
+    if (bgImageSrc.type === 'dynamic_text') return 'Custom URL';
+    if (bgImageSrc.type === 'field') return 'CMS field';
+    return 'Image';
+  }, [isText, bgImageSrc]);
 
   // Check if the layer supports placeholder (input/textarea)
   const hasPlaceholder = layer?.name === 'input' || layer?.name === 'textarea';
@@ -358,6 +385,21 @@ export default function TypographyControls({ layer, onLayerUpdate, activeTextSty
               fieldGroups={fieldGroups}
               allFields={allFields}
               collections={collections}
+              imageTab={isText ? (
+                <TextBackgroundImageTab
+                  ref={bgImageRef}
+                  layer={layer}
+                  onLayerUpdate={onLayerUpdate}
+                  activeTextStyleKey={activeTextStyleKey}
+                  fieldGroups={fieldGroups}
+                  allFields={allFields}
+                  collections={collections}
+                />
+              ) : undefined}
+              onImageActivate={isText ? handleImageActivate : undefined}
+              onImageDeactivate={isText ? handleImageDeactivate : undefined}
+              imagePreviewUrl={textImagePreviewUrl}
+              imageLabel={textImageLabel}
             />
           </div>
         </div>
@@ -533,17 +575,19 @@ export default function TypographyControls({ layer, onLayerUpdate, activeTextSty
                   </div>
                 </PopoverContent>
               </Popover>
-              <Button
-                variant="ghost"
-                size="xs"
+              <span
+                role="button"
+                tabIndex={0}
+                className="p-0.5 rounded-sm opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
                 onClick={handleRemoveUnderline}
               >
-                <Icon name="x" />
-              </Button>
+                <Icon name="x" className="size-2.5" />
+              </span>
             </div>
           </div>
         )}
       </div>
     </div>
   );
-}
+});
+export default TypographyControls;

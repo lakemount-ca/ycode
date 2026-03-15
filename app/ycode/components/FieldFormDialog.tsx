@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import Icon from '@/components/ui/icon';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FIELD_TYPES_BY_CATEGORY, ASSET_FIELD_TYPES, supportsDefaultValue, isAssetFieldType, getFileManagerCategory, getAssetFieldLabel, type FieldType } from '@/lib/collection-field-utils';
 import { parseMultiReferenceValue } from '@/lib/collection-utils';
 import { useCollectionsStore } from '@/stores/useCollectionsStore';
@@ -244,7 +244,7 @@ export default function FieldFormDialog({
                   disabled={mode === 'edit'}
                 >
                   <SelectTrigger id="field-reference-collection" className="w-full">
-                    <SelectValue placeholder="Select a collection" />
+                    <SelectValue placeholder="Select..." />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
@@ -273,10 +273,10 @@ export default function FieldFormDialog({
                 Multiple
               </Label>
               <div className="col-span-4 flex items-center gap-2">
-                <Switch
+                <Checkbox
                   id="field-multiple"
                   checked={fieldMultiple}
-                  onCheckedChange={setFieldMultiple}
+                  onCheckedChange={(checked) => setFieldMultiple(checked === true)}
                   disabled={mode === 'edit' && stableField?.data?.multiple === true}
                 />
                 <Label
@@ -332,7 +332,7 @@ export default function FieldFormDialog({
                   />
                 ) : fieldType === 'boolean' ? (
                   <div className="flex items-center gap-2 h-8">
-                    <Switch
+                    <Checkbox
                       id="field-default"
                       checked={fieldDefault === 'true'}
                       onCheckedChange={(checked) => setFieldDefault(checked ? 'true' : 'false')}

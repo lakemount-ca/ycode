@@ -56,7 +56,7 @@ import AssetFieldCard from './AssetFieldCard';
 import type { Asset, CollectionItemWithValues } from '@/types';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface CollectionItemSheetProps {
   open: boolean;
@@ -768,7 +768,7 @@ export default function CollectionItemSheet({
                             })()
                           ) : field.type === 'boolean' ? (
                             <div className="flex items-center gap-2">
-                              <Switch
+                              <Checkbox
                                 id={`${field.id}-boolean`}
                                 checked={formField.value === 'true'}
                                 onCheckedChange={(checked) => formField.onChange(checked ? 'true' : 'false')}

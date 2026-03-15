@@ -20,7 +20,9 @@ import { serializeLayers, getClassesString } from '@/lib/layer-utils';
 import { collectEditorHiddenLayerIds } from '@/lib/animation-utils';
 import { getCanvasIframeHtml } from '@/lib/canvas-utils';
 import { cn } from '@/lib/utils';
+import { loadSwiperCss } from '@/lib/slider-utils';
 import { useFontsStore } from '@/stores/useFontsStore';
+import { useColorVariablesStore } from '@/stores/useColorVariablesStore';
 
 import type { Layer, Component, CollectionItemWithValues, CollectionField, Breakpoint, Asset, ComponentVariable } from '@/types';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
@@ -107,6 +109,7 @@ interface CanvasContentProps {
   selectedLayerId: string | null;
   hoveredLayerId: string | null;
   pageId: string;
+  pageCollectionItemId?: string;
   pageCollectionItemData: Record<string, string> | null;
   onLayerClick: (layerId: string, event?: React.MouseEvent) => void;
   onLayerUpdate?: (layerId: string, updates: Partial<Layer>) => void;
@@ -124,6 +127,7 @@ function CanvasContent({
   selectedLayerId,
   hoveredLayerId,
   pageId,
+  pageCollectionItemId,
   pageCollectionItemData,
   onLayerClick,
   onLayerUpdate,
@@ -144,13 +148,27 @@ function CanvasContent({
     [editingComponentId]
   );
 
-  // Handle click on canvas body (select body when clicking on empty space)
-  const handleBodyClick = (event: React.MouseEvent) => {
-    // Only select body if clicking directly on it (not on a child layer)
-    if (event.target === event.currentTarget) {
-      onLayerClick('body', event);
-    }
-  };
+  // Select body layer when clicking on empty canvas space.
+  // The #canvas-body div uses display:contents so it has no box — clicks on
+  // empty space land on the iframe <body>, which is outside the React root.
+  // We attach a native listener on the iframe body to handle this.
+  useEffect(() => {
+    if (!bodyRef.current) return;
+    const iframeBody = bodyRef.current.ownerDocument.body;
+
+    const handleBodyClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const isCanvasChrome = target === iframeBody
+        || target.id === 'canvas-mount'
+        || target.id === 'canvas-body';
+      if (isCanvasChrome) {
+        onLayerClick('body');
+      }
+    };
+
+    iframeBody.addEventListener('click', handleBodyClick);
+    return () => iframeBody.removeEventListener('click', handleBodyClick);
+  }, [onLayerClick]);
 
   const bodyLayer = layers.find(l => l.id === 'body');
   const bodyClasses = bodyLayer ? getClassesString(bodyLayer) : '';
@@ -183,7 +201,6 @@ function CanvasContent({
       id="canvas-body"
       data-layer-id="body"
       className="contents"
-      onClick={handleBodyClick}
     >
       <LayerRenderer
         layers={childLayers}
@@ -195,6 +212,7 @@ function CanvasContent({
         onLayerUpdate={onLayerUpdate}
         onLayerHover={onLayerHover}
         pageId={pageId}
+        pageCollectionItemId={pageCollectionItemId}
         pageCollectionItemData={pageCollectionItemData}
         liveLayerUpdates={liveLayerUpdates}
         liveComponentUpdates={liveComponentUpdates}
@@ -321,6 +339,9 @@ export default function Canvas({
       doc.write(getCanvasIframeHtml('canvas-mount'));
       doc.close();
 
+      // Load minimal Swiper CSS (no layout overrides that conflict with Tailwind)
+      loadSwiperCss(doc);
+
       // Load GSAP for animations in the canvas iframe
       const gsapScript = doc.createElement('script');
       gsapScript.src = 'https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js';
@@ -399,6 +420,24 @@ export default function Canvas({
     injectFontsCss(iframeDoc);
   }, [iframeReady, fontsCss, injectFontsCss]);
 
+  // Inject color variable CSS custom properties into the canvas iframe
+  const colorVarCss = useColorVariablesStore((state) => state.generateCssDeclarations());
+
+  useEffect(() => {
+    if (!iframeReady || !iframeRef.current) return;
+    const iframeDoc = iframeRef.current.contentDocument;
+    if (!iframeDoc) return;
+
+    const STYLE_ID = 'ycode-color-vars';
+    let styleEl = iframeDoc.getElementById(STYLE_ID) as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = iframeDoc.createElement('style');
+      styleEl.id = STYLE_ID;
+      iframeDoc.head.appendChild(styleEl);
+    }
+    styleEl.textContent = colorVarCss;
+  }, [iframeReady, colorVarCss]);
+
   // Render content into iframe
   useEffect(() => {
     if (!iframeReady || !rootRef.current) return;
@@ -409,6 +448,7 @@ export default function Canvas({
         selectedLayerId={selectedLayerId}
         hoveredLayerId={effectiveHoveredLayerId}
         pageId={pageId}
+        pageCollectionItemId={pageCollectionItem?.id}
         pageCollectionItemData={pageCollectionItem?.values || null}
         onLayerClick={handleLayerClick}
         onLayerUpdate={onLayerUpdate}
@@ -421,13 +461,15 @@ export default function Canvas({
         editorBreakpoint={breakpoint}
       />
     );
+  // selectedLayerId and hoveredLayerId are intentionally excluded from deps:
+  // SingleLayerRenderer subscribes to the store directly for selection state,
+  // so we don't need to re-render the entire iframe layer tree on selection changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     iframeReady,
     resolvedLayers,
     editingComponentId,
     editingComponentVariables,
-    selectedLayerId,
-    effectiveHoveredLayerId,
     pageId,
     pageCollectionItem,
     handleLayerClick,

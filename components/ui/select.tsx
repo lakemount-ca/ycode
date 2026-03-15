@@ -53,9 +53,12 @@ function SelectTrigger({
   size,
   variant,
   children,
+  onClear,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> &
-  VariantProps<typeof selectVariants>) {
+  VariantProps<typeof selectVariants> & {
+    onClear?: () => void;
+  }) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
@@ -64,9 +67,32 @@ function SelectTrigger({
       {...props}
     >
       {children}
-      <SelectPrimitive.Icon asChild>
-        <Icon name="chevronCombo" className="size-2.5 opacity-50" />
-      </SelectPrimitive.Icon>
+      {onClear ? (
+        <span
+          role="button"
+          tabIndex={0}
+          className="ml-auto -mr-0.5 p-0.5 rounded-sm opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onClear();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              onClear();
+            }
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <Icon name="x" className="size-2.5" />
+        </span>
+      ) : (
+        <SelectPrimitive.Icon asChild>
+          <Icon name="chevronDown" className="size-2.5 opacity-50" />
+        </SelectPrimitive.Icon>
+      )}
     </SelectPrimitive.Trigger>
   )
 }

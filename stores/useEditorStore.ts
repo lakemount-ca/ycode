@@ -75,6 +75,8 @@ interface EditorActions {
   openCollectionItemSheet: (collectionId: string, itemId: string) => void;
   closeCollectionItemSheet: () => void;
   setHoveredLayerId: (id: string | null) => void;
+  renamingLayerId: string | null;
+  setRenamingLayerId: (id: string | null) => void;
   setPreviewMode: (enabled: boolean) => void;
   setActiveSidebarTab: (tab: EditorSidebarTab) => void;
   setLastDesignUrl: (url: string | null) => void;
@@ -95,6 +97,9 @@ interface EditorActions {
   /** Open a RichTextEditorSheet for the given layer (triggered from iframe on double-click) */
   openRichTextSheet: (layerId: string) => void;
   closeRichTextSheet: () => void;
+  setActiveSublayerIndex: (index: number | null) => void;
+  setActiveListItemIndex: (index: number | null) => void;
+  selectLayerWithSublayer: (layerId: string, sublayer: { textStyleKey: string | null; sublayerIndex: number | null; listItemIndex: number | null }) => void;
   // Element picker actions
   startElementPicker: (onSelect: (layerId: string) => void, validate?: (layerId: string) => boolean, originPosition?: { x: number; y: number }) => void;
   stopElementPicker: () => void;
@@ -144,6 +149,12 @@ interface EditorStoreWithHistory extends EditorState {
   dragElementSource: 'elements' | 'layouts' | 'components' | null;
   dragPosition: DragPosition | null;
   canvasDropTarget: CanvasDropTarget | null;
+  // Slider transition state (hides outlines during slide animation)
+  isSliderAnimating: boolean;
+  setSliderAnimating: (value: boolean) => void;
+  // Swiper-calculated snap page counts per slider (used for bullet replication)
+  sliderSnapCounts: Record<string, number>;
+  setSliderSnapCount: (sliderId: string, count: number) => void;
   // Canvas sibling reorder state
   isDraggingLayerOnCanvas: boolean;
   draggedLayerId: string | null;
@@ -155,6 +166,10 @@ interface EditorStoreWithHistory extends EditorState {
   layerDragStartPosition: { x: number; y: number } | null;
   /** Layer ID whose content should be opened in a RichTextEditorSheet (set from iframe on double-click) */
   richTextSheetLayerId: string | null;
+  /** Index of the selected sublayer within a richText element (null = no sublayer selected) */
+  activeSublayerIndex: number | null;
+  /** Index of the selected list item within its parent list (null = no list item selected) */
+  activeListItemIndex: number | null;
   // Element picker state (for linking filter inputs to collection conditions)
   elementPicker: {
     active: boolean;
@@ -194,6 +209,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   activeTextStyleKey: null,
   collectionItemSheet: null,
   hoveredLayerId: null,
+  renamingLayerId: null,
   isPreviewMode: false,
   activeSidebarTab: 'layers' as EditorSidebarTab,
   lastDesignUrl: null,
@@ -216,6 +232,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   dragElementSource: null,
   dragPosition: null,
   canvasDropTarget: null,
+  isSliderAnimating: false,
+  setSliderAnimating: (value) => set({ isSliderAnimating: value }),
+  sliderSnapCounts: {},
+  setSliderSnapCount: (sliderId, count) => set((state) => ({
+    sliderSnapCounts: { ...state.sliderSnapCounts, [sliderId]: count },
+  })),
   // Canvas sibling reorder initial state
   isDraggingLayerOnCanvas: false,
   draggedLayerId: null,
@@ -226,6 +248,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   canvasSiblingDropTarget: null,
   layerDragStartPosition: null,
   richTextSheetLayerId: null,
+  activeSublayerIndex: null,
+  activeListItemIndex: null,
   // Element picker initial state
   elementPicker: null,
 
@@ -241,12 +265,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   setSelectedLayerId: (id) => {
     // Legacy support - also update selectedLayerIds
-    // Clear active text style when changing layers
+    // Clear active text style and sublayer when changing layers
     set({
       selectedLayerId: id,
       selectedLayerIds: id ? [id] : [],
       lastSelectedLayerId: id,
       activeTextStyleKey: null,
+      activeSublayerIndex: null,
+      activeListItemIndex: null,
     });
 
     // Update URL query param if we're in a route that supports layer selection
@@ -482,6 +508,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   }),
 
   setHoveredLayerId: (id) => set({ hoveredLayerId: id }),
+  setRenamingLayerId: (id) => set({ renamingLayerId: id }),
 
   setPreviewMode: (enabled) => set({ isPreviewMode: enabled }),
 
@@ -580,6 +607,27 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   openRichTextSheet: (layerId) => set({ richTextSheetLayerId: layerId }),
   closeRichTextSheet: () => set({ richTextSheetLayerId: null }),
+  setActiveSublayerIndex: (index) => set({ activeSublayerIndex: index }),
+  setActiveListItemIndex: (index) => set({ activeListItemIndex: index }),
+
+  selectLayerWithSublayer: (layerId, sublayer) => {
+    set({
+      selectedLayerId: layerId,
+      selectedLayerIds: [layerId],
+      lastSelectedLayerId: layerId,
+      activeTextStyleKey: sublayer.textStyleKey,
+      activeSublayerIndex: sublayer.sublayerIndex,
+      activeListItemIndex: sublayer.listItemIndex,
+    });
+
+    if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname;
+      const isLayerRoute = /^\/ycode\/(layers|pages|components)\//.test(pathname);
+      if (isLayerRoute) {
+        updateUrlQueryParam('layer', layerId);
+      }
+    }
+  },
 
   // Element picker actions
   startElementPicker: (onSelect, validate, originPosition) => set({

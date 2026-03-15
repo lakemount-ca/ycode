@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-03-03
+
+### Added
+
+- Filter layer with pagination integration for collections
+- Dynamic sorting linked to filter form inputs
+- Collection-sourced select options for reference field filtering
+- Cascading component overrides with enhanced instance management
+- Rich-text component overrides and editor UX improvements
+- Semantic `<label>` tags for form input wrappers
+- Components support in CMS rich-text editor
+- Template or blank project choice in welcome flow
+
+### Fixed
+
+- Scope item reorder to draft rows for accurate publish detection
+- Clean up soft-deleted entities during publish
+- Sort items correctly after drag-and-drop reorder
+- Prevent Space key from stealing focus in button text editor
+- Resolve QueryBuilder crash in orphaned slug fixer
+- Improve audio and video UX settings and component header clickable area in rich-text
+- Preload assets in rich-text component overrides
+- Improve UX for audio and link override settings in sheets
+- Replace sort select with cancel button during linking
+- Apply classes on body to prevent inner divs from interfering with styling
+- Handle negative values in measurement class generation
+- Prevent circular component rendering in LayerRenderer
+- Resolve rich-text editor empty state in production and circular rendering via collections
+- Harden filter pagination and option loading
+- Improve linked filter behavior and picker UI
+- Wrap multi-reference filter values in JSON array
+- Use OR logic between filter form conditions
+
+### Changed
+
+- Standardize form template input defaults
+- Replace sort-by field checkboxes with dropdown
+- Update form classes and design data
+- Improve line UI and placeholder design settings
+- Update multi-reference filtering UI
+
 ## [0.1.0] - 2026-02-24
 
 ### Added

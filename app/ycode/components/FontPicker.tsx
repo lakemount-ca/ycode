@@ -306,7 +306,7 @@ export default function FontPicker({ value, onChange }: FontPickerProps) {
             )}
           >
             <span className="truncate">{getDisplayLabel()}</span>
-            <Icon name="chevronCombo" className="size-2.5 opacity-50" />
+            <Icon name="chevronDown" className="size-2.5 opacity-50" />
           </button>
         </PopoverTrigger>
 

@@ -282,7 +282,7 @@ export default function CollectionLinkFieldInput({
           disabled={disabled}
         >
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select link type" />
+            <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>
             {linkTypeOptions.map((option) => (
@@ -343,7 +343,7 @@ export default function CollectionLinkFieldInput({
                   disabled={disabled || loadingItems}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder={loadingItems ? 'Loading...' : 'Select a CMS item'} />
+                    <SelectValue placeholder={loadingItems ? 'Loading...' : 'Select...'} />
                   </SelectTrigger>
                   <SelectContent>
                     {collectionItems.map((item) => (
@@ -368,7 +368,7 @@ export default function CollectionLinkFieldInput({
                   disabled={disabled}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select anchor" />
+                    <SelectValue placeholder="Select..." />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">

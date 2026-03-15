@@ -15,7 +15,7 @@ import { FieldSelectDropdown, type FieldGroup, type FieldSourceType } from './Co
 import type { Layer, CollectionField, Collection, FieldVariable, AudioSettingsValue } from '@/types';
 import { createAssetVariable, createDynamicTextVariable, getDynamicTextContent, isAssetVariable, getAssetId, isFieldVariable, isDynamicTextVariable } from '@/lib/variable-utils';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -496,7 +496,7 @@ export default function AudioSettings(props: AudioSettingsProps) {
               collections={collections || []}
               value={selectedField || currentFieldId}
               onSelect={handleFieldSelect}
-              placeholder="Select a field"
+              placeholder="Select..."
               allowedFieldTypes={AUDIO_FIELD_TYPES}
             />
           </div>
@@ -512,9 +512,9 @@ export default function AudioSettings(props: AudioSettingsProps) {
         {sourceContent}
 
         {/* Behavior */}
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <Switch
+            <Checkbox
               id="sa-audio-controls" checked={hasControls}
               onCheckedChange={handleControlsChange}
             />
@@ -524,7 +524,7 @@ export default function AudioSettings(props: AudioSettingsProps) {
             >Display controls</Label>
           </div>
           <div className="flex items-center gap-2">
-            <Switch
+            <Checkbox
               id="sa-audio-muted" checked={isMuted}
               onCheckedChange={handleMutedChange}
             />
@@ -534,7 +534,7 @@ export default function AudioSettings(props: AudioSettingsProps) {
             >Mute sound</Label>
           </div>
           <div className="flex items-center gap-2">
-            <Switch
+            <Checkbox
               id="sa-audio-loop" checked={isLoop}
               onCheckedChange={handleLoopChange}
             />
@@ -598,9 +598,9 @@ export default function AudioSettings(props: AudioSettingsProps) {
                 <Label variant="muted">Behavior</Label>
               </div>
 
-              <div className="col-span-2 flex flex-col gap-3">
+              <div className="col-span-2 flex flex-col gap-2">
                 <div className="flex items-center gap-2">
-                  <Switch
+                  <Checkbox
                     id="audio-controls"
                     checked={hasControls}
                     onCheckedChange={handleControlsChange}
@@ -615,7 +615,7 @@ export default function AudioSettings(props: AudioSettingsProps) {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Switch
+                  <Checkbox
                     id="audio-loop"
                     checked={isLoop}
                     onCheckedChange={handleLoopChange}
@@ -630,7 +630,7 @@ export default function AudioSettings(props: AudioSettingsProps) {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Switch
+                  <Checkbox
                     id="audio-muted"
                     checked={isMuted}
                     onCheckedChange={handleMutedChange}

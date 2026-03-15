@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 
 const InputGroupContext = React.createContext<{ size: 'xs' | 'sm' }>({ size: 'xs' });
 
@@ -102,8 +102,7 @@ const inputGroupButtonVariants = cva(
       size: {
         xs: "h-6 gap-1 px-2 rounded-[calc(var(--radius)-5px)] [&>svg:not([class*='size-'])]:size-3.5 has-[>svg]:px-2",
         sm: 'h-8 px-2.5 gap-1.5 rounded-md has-[>svg]:px-2.5',
-        'icon-xs':
-          'size-6 rounded-[calc(var(--radius)-5px)] p-0 has-[>svg]:p-0',
+        'icon-xs': 'size-6 rounded-[calc(var(--radius)-5px)] p-0 has-[>svg]:p-0',
         'icon-sm': 'size-8 p-0 has-[>svg]:p-0',
       },
     },
@@ -208,26 +207,24 @@ function InputGroupInput({
         {...props}
       />
       {stepper && !props.disabled && (
-        <InputGroupAddon align="inline-end" className="p-0 px-1.5 hidden group-hover:flex absolute right-0 top-0 bg-gradient-to-l from-input backdrop-blur h-full items-center rounded-r-[10px]">
-          <div className="flex flex-col">
-            <InputGroupButton
-              size="icon-xs"
-              variant="ghost"
+        <InputGroupAddon align="inline-end" className="p-0 px-1.5 hidden group-hover:flex absolute right-0 top-0 h-full items-center rounded-r-[10px]">
+          <div className="flex flex-col -gap-px">
+            <span
+              role="button"
+              tabIndex={-1}
+              className="p-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
               onClick={handleIncrement}
-              className="size-2.5"
-              tabIndex={-1}
             >
-              <ChevronUp />
-            </InputGroupButton>
-            <InputGroupButton
-              size="icon-xs"
-              variant="ghost"
+              <Icon name="chevronUp" className="size-2.5" />
+            </span>
+            <span
+              role="button"
+              tabIndex={-1}
+              className="p-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer -mt-0.5"
               onClick={handleDecrement}
-              className="size-2.5"
-              tabIndex={-1}
             >
-              <ChevronDown />
-            </InputGroupButton>
+              <Icon name="chevronDown" className="size-2.5" />
+            </span>
           </div>
         </InputGroupAddon>
       )}

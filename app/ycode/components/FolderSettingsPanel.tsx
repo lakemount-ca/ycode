@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Icon from '@/components/ui/icon';
@@ -599,10 +599,10 @@ const FolderSettingsPanel = React.forwardRef<FolderSettingsPanelHandle, FolderSe
                         Restrict access to all pages in this folder and its sub-folders. Setting a password will override any password set on a parent folder.
                       </FieldDescription>
                     </FieldContent>
-                    <Switch
+                    <Checkbox
                       id="passwordProtected"
                       checked={authEnabled}
-                      onCheckedChange={setAuthEnabled}
+                      onCheckedChange={(checked) => setAuthEnabled(checked === true)}
                     />
                   </Field>
 

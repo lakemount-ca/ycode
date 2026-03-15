@@ -8,7 +8,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import Icon from '@/components/ui/icon';
 import type { CollectionField } from '@/types';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
@@ -58,12 +58,11 @@ function SortableFieldItem({ field, onToggleVisibility }: SortableFieldItemProps
         name="grip-vertical"
         className="size-3.5 text-muted-foreground shrink-0"
       />
-      <Switch
+      <Checkbox
         checked={!field.hidden}
         onCheckedChange={() => onToggleVisibility(field.id)}
         disabled={field.name.toLowerCase() === 'name'}
         className="shrink-0"
-        size="sm"
       />
       <span className="truncate text-xs text-muted-foreground select-none">{field.name}</span>
     </div>

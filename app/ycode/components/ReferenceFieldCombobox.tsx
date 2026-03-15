@@ -46,7 +46,7 @@ export default function ReferenceFieldCombobox({
   value,
   onChange,
   isMulti = false,
-  placeholder = 'Select item...',
+  placeholder = 'Select...',
   disabled = false,
 }: ReferenceFieldComboboxProps) {
   const [open, setOpen] = useState(false);
@@ -179,7 +179,7 @@ export default function ReferenceFieldCombobox({
           >
             <span className="truncate">{getDisplayText()}</span>
             <Icon
-              name="chevronCombo"
+              name="chevronDown"
               className={cn('size-2.5 opacity-50 ml-2', open && '')}
             />
           </Button>

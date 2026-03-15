@@ -152,7 +152,7 @@ export default function LabelSettings({
               onValueChange={handleForChange}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select input" />
+                <SelectValue placeholder="Select..." />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>

@@ -1,6 +1,6 @@
 /**
  * Auth Store
- * 
+ *
  * Manages authentication state using Supabase Auth
  */
 
@@ -53,12 +53,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         return;
       }
 
-      // Get initial session
+      // Validate session server-side (getUser verifies the JWT, unlike getSession)
+      const { data: { user } } = await supabase.auth.getUser();
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       set({
-        user: session?.user ?? null,
-        session,
+        user: user ?? null,
+        session: user ? session : null,
         initialized: true,
       });
 
@@ -86,12 +87,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
     try {
       const supabase = await createBrowserClient();
-      
+
       if (!supabase) {
         set({ loading: false, error: 'Supabase not configured. Please complete setup first.' });
         return { error: 'Supabase not configured. Please complete setup first.' };
       }
-      
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -137,12 +138,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
     try {
       const supabase = await createBrowserClient();
-      
+
       if (!supabase) {
         set({ loading: false, error: 'Supabase not configured. Please complete setup first.' });
         return { error: 'Supabase not configured. Please complete setup first.' };
       }
-      
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -175,7 +176,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
     try {
       const supabase = await createBrowserClient();
-      
+
       if (!supabase) {
         // If Supabase is not configured, just clear local state
         set({
@@ -185,7 +186,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         });
         return;
       }
-      
+
       const { error } = await supabase.auth.signOut();
 
       if (error) {
@@ -210,11 +211,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   checkSession: async () => {
     try {
       const supabase = await createBrowserClient();
-      
+
       if (!supabase) {
         return;
       }
-      
+
       const { data: { session } } = await supabase.auth.getSession();
 
       set({

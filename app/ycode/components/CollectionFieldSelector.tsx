@@ -353,7 +353,7 @@ export function FieldSelectDropdown({
   collections,
   value,
   onSelect,
-  placeholder = 'Select a field',
+  placeholder = 'Select...',
   disabled = false,
   className,
   allowedFieldTypes,
@@ -404,7 +404,7 @@ export function FieldSelectDropdown({
               <span className="text-muted-foreground">{hasFields ? placeholder : 'No fields available'}</span>
             )}
           </span>
-          <Icon name="chevronCombo" className="size-2.5 opacity-50 shrink-0" />
+          <Icon name="chevronDown" className="size-2.5 opacity-50 shrink-0" />
         </button>
       </DropdownMenuTrigger>
 

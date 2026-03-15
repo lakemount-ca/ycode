@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import LayerLockIndicator from '@/components/collaboration/LayerLockIndicator';
@@ -11,7 +11,9 @@ import { useLocalisationStore } from '@/stores/useLocalisationStore';
 import type { Layer, Locale, ComponentVariable, FormSettings, LinkSettings, Breakpoint, CollectionItemWithValues, Component } from '@/types';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
 import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-updates';
-import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextEditable, getCollectionVariable, evaluateVisibility } from '@/lib/layer-utils';
+import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextEditable, isTextContentLayer, isRichTextLayer, getCollectionVariable, evaluateVisibility, findAncestorByName, filterDisabledSliderLayers, getLayerCmsFieldBinding } from '@/lib/layer-utils';
+import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
+import { useCanvasSlider } from '@/hooks/use-canvas-slider';
 import { resolveFieldFromSources } from '@/lib/cms-variables-utils';
 import { getDynamicTextContent, getImageUrlFromVariable, getVideoUrlFromVariable, getIframeUrlFromVariable, isFieldVariable, isAssetVariable, isStaticTextVariable, isDynamicTextVariable, getAssetId, getStaticTextContent, createAssetVariable, createDynamicTextVariable, resolveDesignStyles } from '@/lib/variable-utils';
 import { getTranslatedAssetId, getTranslatedText } from '@/lib/localisation-utils';
@@ -24,7 +26,7 @@ import { generateImageSrcset, getImageSizes, getOptimizedImageUrl } from '@/lib/
 import { useEditorStore } from '@/stores/useEditorStore';
 import { toast } from 'sonner';
 import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
-import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
+import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, flattenTiptapParagraphs, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
 import { hasComponentOrVariable } from '@/lib/tiptap-utils';
 import LayerContextMenu from '@/app/ycode/components/LayerContextMenu';
 import CanvasTextEditor from '@/app/ycode/components/CanvasTextEditor';
@@ -249,7 +251,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
 
     return (
       <LayerItem
-        key={layer.id}
+        key={(layer as Layer & { _bulletKey?: string })._bulletKey || layer.id}
         layer={layer}
         isEditMode={isEditMode}
         isPublished={isPublished}
@@ -403,8 +405,9 @@ const LayerItem: React.FC<{
   components: componentsProp,
   ancestorComponentIds,
 }) => {
-  const isSelected = selectedLayerId === layer.id;
-  const isHovered = hoveredLayerId === layer.id;
+  // Subscribe to selection state from the store for reactive updates without
+  // forcing the entire LayerRenderer tree to re-render when selection changes
+  const isSelected = useEditorStore((state) => state.selectedLayerId === layer.id);
   const isEditing = editingLayerId === layer.id;
   const isDragging = activeLayerId === layer.id;
   const textEditable = isTextEditable(layer);
@@ -458,6 +461,8 @@ const LayerItem: React.FC<{
   const allComponents = storeComponents.length > 0 ? storeComponents : (componentsProp ?? []);
 
   // Shared props passed to nested LayerRenderer calls (component instances & rich-text components)
+  // selectedLayerId and hoveredLayerId are omitted: each SingleLayerRenderer subscribes
+  // directly to useEditorStore for selection state to avoid cascading re-renders.
   const sharedRendererProps = useMemo(() => ({
     isEditMode,
     isPublished,
@@ -490,7 +495,10 @@ const LayerItem: React.FC<{
     anchorMap,
     resolvedAssets,
     components: componentsProp,
-  }), [isEditMode, isPublished, selectedLayerId, hoveredLayerId, onLayerClick, onLayerUpdate, onLayerHover, pageId, collectionLayerData, collectionLayerItemId, effectiveLayerDataMap, pageCollectionItemId, pageCollectionItemData, hiddenLayerInfo, editorHiddenLayerIds, editorBreakpoint, currentLocale, availableLocales, localeSelectorFormat, liveLayerUpdates, liveComponentUpdates, isInsideForm, parentFormSettings, pages, folders, collectionItemSlugs, isPreview, translations, anchorMap, resolvedAssets, componentsProp]);
+  // selectedLayerId and hoveredLayerId kept in the object for SSR/published mode
+  // but excluded from deps so changes don't cascade re-renders in edit mode.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [isEditMode, isPublished, onLayerClick, onLayerUpdate, onLayerHover, pageId, collectionLayerData, collectionLayerItemId, effectiveLayerDataMap, pageCollectionItemId, pageCollectionItemData, hiddenLayerInfo, editorHiddenLayerIds, editorBreakpoint, currentLocale, availableLocales, localeSelectorFormat, liveLayerUpdates, liveComponentUpdates, isInsideForm, parentFormSettings, pages, folders, collectionItemSlugs, isPreview, translations, anchorMap, resolvedAssets, componentsProp]);
 
   // Callback for rendering embedded components inside rich-text content
   // Clicks on the embedded component's internal layers should select the text layer
@@ -530,12 +538,14 @@ const LayerItem: React.FC<{
 
   let htmlTag = getLayerHtmlTag(layer);
 
+  const isSimpleTextLayer = isTextContentLayer(layer);
+
   // Check if we need to override the tag for rich text with block elements
   // Tags like <p>, <h1>-<h6> cannot contain block elements like <ul>/<ol>
   const textVariable = layer.variables?.text;
   let useSpanForParagraphs = false;
 
-  {
+  if (!isSimpleTextLayer) {
     const restrictiveBlockTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button'];
     const isRestrictiveTag = restrictiveBlockTags.includes(htmlTag);
 
@@ -580,6 +590,16 @@ const LayerItem: React.FC<{
   // So we need to use 'div' as the outer tag to avoid invalid nesting like <p><div>
   if (isEditing && textEditable) {
     htmlTag = 'div';
+  }
+
+  // Buttons with link settings render as <a> directly instead of being
+  // wrapped in <a><button></button></a> which is invalid HTML
+  const isButtonWithLink = layer.name === 'button'
+    && !isEditMode
+    && !isInsideForm
+    && isValidLinkSettings(layer.variables?.link);
+  if (isButtonWithLink) {
+    htmlTag = 'a';
   }
 
   // Code Embed iframe ref and effect - must be at component level
@@ -840,7 +860,7 @@ const LayerItem: React.FC<{
       if (valueToRender !== undefined) {
         // Value is typed as ComponentVariableValue - check if it's a text variable (has 'type' property)
         if ('type' in valueToRender && valueToRender.type === 'dynamic_rich_text') {
-          return renderRichText(valueToRender as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds);
+          return renderRichText(valueToRender as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds, isSimpleTextLayer);
         }
         if ('type' in valueToRender && valueToRender.type === 'dynamic_text') {
           return (valueToRender as any).data.content;
@@ -853,9 +873,11 @@ const LayerItem: React.FC<{
 
     // Check for DynamicRichTextVariable format (with formatting)
     if (textVariable?.type === 'dynamic_rich_text') {
-      // Render rich text with formatting (bold, italic, etc.) and inline variables
-      // In edit mode, adds data-style attributes for style selection
-      return renderRichText(textVariable as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds);
+      // For heading/text elements, flatten multi-paragraph content into single paragraph with <br>
+      const variable = isSimpleTextLayer
+        ? { ...textVariable, data: { ...textVariable.data, content: flattenTiptapParagraphs(textVariable.data.content) } }
+        : textVariable;
+      return renderRichText(variable as any, collectionLayerData, pageCollectionItemData || undefined, layer.textStyles, useSpanForParagraphs, isEditMode, linkContext, timezone, effectiveLayerDataMap, allComponents, renderComponentBlock, effectiveAncestorIds, isSimpleTextLayer);
     }
 
     // Check for inline variables in DynamicTextVariable format (legacy)
@@ -1087,6 +1109,19 @@ const LayerItem: React.FC<{
           values: virtualValues,
         };
       });
+    } else if (sourceFieldType === 'inverse_reference' && sourceFieldId) {
+      // Inverse reference: filter items whose reference field value matches the parent item ID
+      const parentId = collectionLayerItemId || pageCollectionItemId;
+      if (!parentId) return [];
+      items = allCollectionItems.filter(item => {
+        const fieldValue = item.values[sourceFieldId];
+        if (!fieldValue) return false;
+        // Single reference: exact match
+        if (fieldValue === parentId) return true;
+        // Multi-reference: check if JSON array contains the parent ID
+        const ids = parseMultiReferenceValue(fieldValue);
+        return ids.includes(parentId);
+      });
     } else if (!sourceFieldId) {
       items = allCollectionItems;
     } else {
@@ -1134,7 +1169,7 @@ const LayerItem: React.FC<{
     }
 
     return items;
-  }, [allCollectionItems, sourceFieldId, sourceFieldType, sourceFieldSource, collectionLayerData, pageCollectionItemData, getAsset, collectionVariable?.filters]);
+  }, [allCollectionItems, sourceFieldId, sourceFieldType, sourceFieldSource, collectionLayerData, pageCollectionItemData, collectionLayerItemId, pageCollectionItemId, getAsset, assetsById, collectionVariable?.filters]);
 
   useEffect(() => {
     if (!isEditMode) return;
@@ -1168,7 +1203,33 @@ const LayerItem: React.FC<{
 
   // For component instances in edit mode, use the component's layers as children
   // For published pages, children are already resolved server-side
-  const children = (isEditMode && component && component.layers) ? component.layers : layer.children;
+  const baseChildren = (isEditMode && component && component.layers) ? component.layers : layer.children;
+
+  // Replicate the single bullet template for each slide on canvas.
+  // The count comes from Swiper's snap grid (set by useCanvasSlider).
+  const sliderSnapCounts = useEditorStore((s) => s.sliderSnapCounts);
+  const children = useMemo(() => {
+    if (!isEditMode || layer.name !== 'slideBullets' || !baseChildren?.length) return baseChildren;
+    const currentPageId = useEditorStore.getState().currentPageId;
+    if (!currentPageId) return baseChildren;
+    const allLayers = usePagesStore.getState().draftsByPageId[currentPageId]?.layers;
+    if (!allLayers) return baseChildren;
+    const slider = findAncestorByName(allLayers, layer.id, 'slider');
+    if (!slider) return baseChildren;
+    const bulletCount = sliderSnapCounts[slider.id] || slider.children?.find(c => c.name === 'slides')?.children?.length || 1;
+    const bulletTemplate = baseChildren[0];
+    return Array.from({ length: bulletCount }, (_, i) => ({
+      ...bulletTemplate,
+      id: bulletTemplate.id,
+      _bulletKey: `${bulletTemplate.id}-${i}`,
+    }));
+  }, [isEditMode, layer.name, layer.id, baseChildren, sliderSnapCounts]);
+
+  // For slider layers, strip inactive pagination/navigation children entirely
+  const effectiveChildren = useMemo(() => {
+    if (layer.name !== 'slider' || !children?.length) return children;
+    return filterDisabledSliderLayers(children, layer.settings);
+  }, [layer.name, layer.settings, children]);
 
   // Use sortable for drag and drop
   const {
@@ -1185,10 +1246,16 @@ const LayerItem: React.FC<{
     },
   });
 
+  // Canvas slider: init Swiper on slider layers and handle slide navigation
+  const sliderRef = useRef<HTMLElement | null>(null);
+  useCanvasSlider(sliderRef, layer, isEditMode);
+
   const startEditing = (clickX?: number, clickY?: number) => {
     // Enable inline editing for text layers (both rich text and plain text)
     if (textEditable && isEditMode && !isLockedByOther) {
       setEditingLayerId(layer.id);
+      // Clear sublayer selection when entering edit mode
+      useEditorStore.getState().setActiveSublayerIndex(null);
       // Store click coordinates if provided
       if (typeof clickX === 'number' && typeof clickY === 'number') {
         setEditingClickCoords({ x: clickX, y: clickY });
@@ -1276,9 +1343,9 @@ const LayerItem: React.FC<{
   // Show projection indicator if this is being dragged over
   const showProjection = projected && activeLayerId && activeLayerId !== layer.id;
 
-  // Build className with editor states if in edit mode
-  // When layer tag is p and has text, add paragraph default classes (block, margin) so the wrapper displays correctly
-  const paragraphClasses = htmlTag === 'p' && layer.variables?.text
+  // For rich text elements, add paragraph default classes when tag is <p>
+  // Skip for heading/text — they render their own tag directly
+  const paragraphClasses = !isSimpleTextLayer && htmlTag === 'p' && layer.variables?.text
     ? getTextStyleClasses(layer.textStyles, 'paragraph')
     : '';
 
@@ -1286,15 +1353,24 @@ const LayerItem: React.FC<{
   // twMerge incorrectly removes leading-* when text-[...] is present
   // because it treats font-size as overriding line-height. Our own
   // setBreakpointClass already handles property-aware conflict resolution.
+
+  // <a> with display:flex is block-level (full width) unlike <button> which
+  // shrink-wraps. Add w-fit to match button sizing unless width is explicit.
+  const buttonNeedsFit = isButtonWithLink && (() => {
+    const cls = Array.isArray(layer.classes) ? layer.classes : (layer.classes || '').split(' ');
+    return !cls.some((c: string) => /^w-/.test(c.split(':').pop() || ''));
+  })();
+
   const fullClassName = isEditMode ? clsx(
     classesString,
     paragraphClasses,
+    SWIPER_CLASS_MAP[layer.name],
     enableDragDrop && !isEditing && !isLockedByOther && 'cursor-default',
     isDragging && 'opacity-30',
     showProjection && 'outline outline-1 outline-dashed outline-blue-400 bg-blue-50/10',
     isLockedByOther && 'opacity-90 pointer-events-none select-none',
     'ycode-layer'
-  ) : clsx(classesString, paragraphClasses);
+  ) : clsx(classesString, paragraphClasses, SWIPER_CLASS_MAP[layer.name], buttonNeedsFit && 'w-fit');
 
   // Check if layer should be hidden (hide completely in both edit mode and public pages)
   if (layer.settings?.hidden) {
@@ -1456,16 +1532,25 @@ const LayerItem: React.FC<{
     // Check if element is truly empty (no text, no children)
     const isEmpty = !textContent && (!children || children.length === 0);
 
+    // Layers with a visible border or background shouldn't show the empty placeholder (canvas only)
+    const hasVisualStyle = isEditMode && isEmpty && (
+      (classesString && /\b(bg-|border-)/.test(classesString)) ||
+      Object.keys(mergedStyle).some(k => k.startsWith('background') || k.startsWith('border'))
+    );
+
     // Check if this is the Body layer (locked)
     const isLocked = layer.id === 'body';
 
     // Build props for the element
-    const combinedRef = isFilterLayer
-      ? (node: HTMLElement | null) => {
-        setNodeRef(node);
+    const combinedRef = (node: HTMLElement | null) => {
+      setNodeRef(node);
+      if (isFilterLayer) {
         (filterLayerRef as React.MutableRefObject<HTMLDivElement | null>).current = node as HTMLDivElement | null;
       }
-      : setNodeRef;
+      if (layer.name === 'slider') {
+        sliderRef.current = node;
+      }
+    };
 
     const elementProps: Record<string, unknown> = {
       ref: combinedRef,
@@ -1474,8 +1559,72 @@ const LayerItem: React.FC<{
       'data-layer-id': layer.id,
       'data-layer-type': htmlTag,
       'data-is-empty': isEmpty ? 'true' : 'false',
+      ...(hasVisualStyle && { 'data-has-visual': 'true' }),
       ...(enableDragDrop && !isEditing && !isLockedByOther ? { ...normalizedAttributes, ...listeners } : normalizedAttributes),
+      ...(!isEditMode && { suppressHydrationWarning: true }),
     };
+
+    // When a button is rendered as <a>, apply link attributes directly
+    if (isButtonWithLink && layer.variables?.link) {
+      const btnLinkSettings = layer.variables.link;
+      const btnLinkContext: LinkResolutionContext = {
+        pages,
+        folders,
+        collectionItemSlugs,
+        collectionItemId: collectionLayerItemId,
+        pageCollectionItemId,
+        collectionItemData: collectionLayerData,
+        pageCollectionItemData: pageCollectionItemData || undefined,
+        isPreview,
+        locale: currentLocale,
+        translations,
+        getAsset,
+        anchorMap,
+        resolvedAssets,
+        layerDataMap: effectiveLayerDataMap,
+      };
+      const btnLinkHref = generateLinkHref(btnLinkSettings, btnLinkContext);
+      if (btnLinkHref) {
+        elementProps.href = btnLinkHref;
+        elementProps.target = btnLinkSettings.target || '_self';
+        const btnLinkRel = btnLinkSettings.rel || (btnLinkSettings.target === '_blank' ? 'noopener noreferrer' : undefined);
+        if (btnLinkRel) elementProps.rel = btnLinkRel;
+        if (btnLinkSettings.download) elementProps.download = btnLinkSettings.download;
+      }
+      elementProps.role = 'button';
+      delete elementProps.type;
+    }
+
+    // When an <a> layer has link settings, apply href/target/rel directly
+    if (htmlTag === 'a' && !isButtonWithLink && !isEditMode && layer.variables?.link) {
+      const aLinkSettings = layer.variables.link;
+      if (isValidLinkSettings(aLinkSettings)) {
+        const aLinkContext: LinkResolutionContext = {
+          pages,
+          folders,
+          collectionItemSlugs,
+          collectionItemId: collectionLayerItemId,
+          pageCollectionItemId,
+          collectionItemData: collectionLayerData,
+          pageCollectionItemData: pageCollectionItemData || undefined,
+          isPreview,
+          locale: currentLocale,
+          translations,
+          getAsset,
+          anchorMap,
+          resolvedAssets,
+          layerDataMap: effectiveLayerDataMap,
+        };
+        const aLinkHref = generateLinkHref(aLinkSettings, aLinkContext);
+        if (aLinkHref) {
+          elementProps.href = aLinkHref;
+          elementProps.target = aLinkSettings.target || '_self';
+          const aLinkRel = aLinkSettings.rel || (aLinkSettings.target === '_blank' ? 'noopener noreferrer' : undefined);
+          if (aLinkRel) elementProps.rel = aLinkRel;
+          if (aLinkSettings.download) elementProps.download = aLinkSettings.download;
+        }
+      }
+    }
 
     // Add data-gsap-hidden attribute for elements that should start hidden
     const hiddenInfo = hiddenLayerInfo?.find(info => info.layerId === layer.id);
@@ -1485,14 +1634,56 @@ const LayerItem: React.FC<{
     }
 
     // Handle alert elements (for form success/error messages)
+    // Hidden by default in published/preview mode; form submission JS reveals them.
     if (layer.alertType) {
       elementProps['data-alert-type'] = layer.alertType;
+      if (!isEditMode) {
+        const existingStyle = (typeof elementProps.style === 'object' && elementProps.style) || {};
+        elementProps.style = { ...existingStyle, display: 'none' };
+      }
+    }
+
+    // Add slider data attributes for production/preview rendering (SliderInitializer)
+    if (!isEditMode) {
+      if (layer.name === 'slider' && layer.settings?.slider) {
+        elementProps['data-slider-id'] = layer.id;
+        elementProps['data-slider-settings'] = JSON.stringify(layer.settings.slider);
+      }
+      if (SWIPER_DATA_ATTR_MAP[layer.name]) {
+        elementProps[SWIPER_DATA_ATTR_MAP[layer.name]] = '';
+      }
+
+      // Lightbox data attributes (LightboxInitializer)
+      if (layer.name === 'lightbox' && layer.settings?.lightbox) {
+        const lbSettings = layer.settings.lightbox;
+        elementProps['data-lightbox-id'] = lbSettings.groupId || layer.id;
+        const { filesField: _ff, filesSource: _fs, ...runtimeSettings } = lbSettings;
+        elementProps['data-lightbox-settings'] = JSON.stringify(runtimeSettings);
+        const resolvedFiles = lbSettings.files
+          .map((fileId: string) => {
+            if (fileId.startsWith('http') || fileId.startsWith('/')) return fileId;
+            return getAsset(fileId)?.public_url ?? null;
+          })
+          .filter(Boolean) as string[];
+        if (resolvedFiles.length) {
+          elementProps['data-lightbox-files'] = resolvedFiles.join(',');
+        }
+        if (lbSettings.groupId && resolvedFiles.length > 0) {
+          elementProps['data-lightbox-open-to'] = resolvedFiles[0];
+        }
+      }
     }
 
     // Hide elements with hiddenGenerated: true by default (in all modes)
     if (layer.hiddenGenerated) {
       const existingStyle = typeof elementProps.style === 'object' ? elementProps.style : {};
       elementProps.style = { ...existingStyle, display: 'none' };
+    }
+
+    // Hide bullet pagination template until Swiper generates the real bullets
+    if (!isEditMode && layer.name === 'slideBullets') {
+      const existingStyle = typeof elementProps.style === 'object' ? elementProps.style : {};
+      elementProps.style = { ...existingStyle, visibility: 'hidden' as const };
     }
 
     // Hide elements that have display: hidden animation with on-load apply style (edit mode only)
@@ -1505,12 +1696,12 @@ const LayerItem: React.FC<{
         (editorBreakpoint && hiddenBreakpoints.includes(editorBreakpoint));
 
       if (shouldHideOnBreakpoint) {
-        const isSelectedOrChildSelected = isSelected || (selectedLayerId && (() => {
-          // Check if selectedLayerId is a descendant of this layer
+        const storeSelectedId = useEditorStore.getState().selectedLayerId;
+        const isSelectedOrChildSelected = isSelected || (storeSelectedId && (() => {
           const checkDescendants = (children: Layer[] | undefined): boolean => {
             if (!children) return false;
             for (const child of children) {
-              if (child.id === selectedLayerId) return true;
+              if (child.id === storeSelectedId) return true;
               if (checkDescendants(child.children)) return true;
             }
             return false;
@@ -1583,13 +1774,43 @@ const LayerItem: React.FC<{
         if (isLockedByOther) return;
         e.stopPropagation();
 
+        // Any element with CMS field binding: open collection item editor
+        const cmsBinding = getLayerCmsFieldBinding(layer);
+        if (cmsBinding) {
+          let targetCollectionId: string | null = null;
+          let targetItemId: string | undefined;
+
+          if (cmsBinding.source === 'collection' && cmsBinding.collection_layer_id && collectionItemId) {
+            const layerConfig = useCollectionLayerStore.getState().layerConfig;
+            targetCollectionId = layerConfig[cmsBinding.collection_layer_id]?.collectionId || null;
+            targetItemId = collectionItemId;
+          } else if (pageCollectionItemId) {
+            const currentPageId = useEditorStore.getState().currentPageId;
+            const currentPage = usePagesStore.getState().pages.find((p) => p.id === currentPageId);
+            targetCollectionId = currentPage?.settings?.cms?.collection_id || null;
+            targetItemId = pageCollectionItemId;
+          }
+
+          if (targetCollectionId && targetItemId) {
+            useEditorStore.getState().openCollectionItemSheet(targetCollectionId, targetItemId);
+            return;
+          }
+        }
+
         // Image layers: open file manager for quick image replacement
         if (layer.name === 'image' || htmlTag === 'img') {
           openImageFileManager();
           return;
         }
 
-        // Rich text with components or inline variables: open sheet editor instead of canvas editing
+        // RichText layers: always open sheet editor (block-level content needs full toolbar)
+        if (isRichTextLayer(layer)) {
+          useEditorStore.getState().setActiveSublayerIndex(null);
+          useEditorStore.getState().openRichTextSheet(layer.id);
+          return;
+        }
+
+        // Text/Heading with components or inline variables: open sheet editor
         if (textEditable) {
           const textVar = layer.variables?.text;
           const richContent = textVar?.type === 'dynamic_rich_text' ? textVar.data.content : null;
@@ -1599,7 +1820,7 @@ const LayerItem: React.FC<{
           }
         }
 
-        // Text-editable layers: start inline editing
+        // Text/Heading layers: start inline editing
         startEditing(e.clientX, e.clientY);
       };
       // Prevent context menu from bubbling
@@ -1654,7 +1875,7 @@ const LayerItem: React.FC<{
       const finalImageUrl = imageUrl && imageUrl.trim() !== '' ? imageUrl : DEFAULT_ASSETS.IMAGE;
 
       // Generate optimized src and srcset for responsive images
-      const optimizedSrc = getOptimizedImageUrl(finalImageUrl, 1200, 1200, 85);
+      const optimizedSrc = getOptimizedImageUrl(finalImageUrl, 1920, 1920, 85);
       const srcset = generateImageSrcset(finalImageUrl);
       const sizes = getImageSizes();
 
@@ -2131,9 +2352,9 @@ const LayerItem: React.FC<{
       return (
         <Tag {...mediaProps}>
           {textContent && textContent}
-          {children && children.length > 0 && (
+          {effectiveChildren && effectiveChildren.length > 0 && (
             <LayerRenderer
-              layers={children}
+              layers={effectiveChildren}
               onLayerClick={onLayerClick}
               onLayerUpdate={onLayerUpdate}
               onLayerHover={onLayerHover}
@@ -2308,9 +2529,9 @@ const LayerItem: React.FC<{
               >
                 {textContent && textContent}
 
-                {children && children.length > 0 && (
+                {effectiveChildren && effectiveChildren.length > 0 && (
                   <LayerRenderer
-                    layers={children}
+                    layers={effectiveChildren}
                     onLayerClick={onLayerClick}
                     onLayerUpdate={onLayerUpdate}
                     onLayerHover={onLayerHover}
@@ -2326,7 +2547,11 @@ const LayerItem: React.FC<{
                     collectionItemId={item.id}
                     layerDataMap={updatedLayerDataMap}
                     pageCollectionItemId={pageCollectionItemId}
-                    pageCollectionItemData={pageCollectionItemData}
+                    pageCollectionItemData={
+                      sourceFieldType === 'multi_asset' && sourceFieldSource === 'page'
+                        ? { ...pageCollectionItemData, ...enhancedItemValues }
+                        : pageCollectionItemData
+                    }
                     hiddenLayerInfo={hiddenLayerInfo}
                     editorHiddenLayerIds={editorHiddenLayerIds}
                     editorBreakpoint={editorBreakpoint}
@@ -2372,9 +2597,9 @@ const LayerItem: React.FC<{
           {textContent && textContent}
 
           {/* Render children with format prop */}
-          {children && children.length > 0 && (
+          {effectiveChildren && effectiveChildren.length > 0 && (
             <LayerRenderer
-              layers={children}
+              layers={effectiveChildren}
               onLayerClick={onLayerClick}
               onLayerUpdate={onLayerUpdate}
               onLayerHover={onLayerHover}
@@ -2427,6 +2652,7 @@ const LayerItem: React.FC<{
       );
     }
 
+    // In edit mode, slides wrapper shows only the slide containing the selection
     // Regular elements with text and/or children
     return (
       <Tag {...elementProps}>
@@ -2441,9 +2667,9 @@ const LayerItem: React.FC<{
         {textContent && textContent}
 
         {/* Render children */}
-        {children && children.length > 0 && (
+        {effectiveChildren && effectiveChildren.length > 0 && (
           <LayerRenderer
-            layers={children}
+            layers={effectiveChildren}
             onLayerClick={onLayerClick}
             onLayerUpdate={onLayerUpdate}
             onLayerHover={onLayerHover}
@@ -2500,8 +2726,10 @@ const LayerItem: React.FC<{
 
   // Wrap with link if layer has link settings (published mode only)
   // In edit mode, links are not interactive to allow layer selection
+  // Skip for buttons — they render as <a> directly (see isButtonWithLink)
+  // Skip for <a> layers — they already render as <a> and nesting <a> inside <a> is invalid HTML
   const linkSettings = layer.variables?.link;
-  const shouldWrapWithLink = !isEditMode && isValidLinkSettings(linkSettings);
+  const shouldWrapWithLink = !isEditMode && !isButtonWithLink && htmlTag !== 'a' && isValidLinkSettings(linkSettings);
 
   if (shouldWrapWithLink && linkSettings) {
     // Build link context for layer-level link resolution

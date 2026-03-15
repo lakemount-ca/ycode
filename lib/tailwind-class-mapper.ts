@@ -81,6 +81,9 @@ export function extractBgImgVarName(cls: string): string | null {
  * Used to distinguish between text-[color] and text-[size] arbitrary values
  */
 function isColorValue(value: string): boolean {
+  // Check for CSS custom property color references: color:var(--...)
+  if (/^color:var\(--/.test(value)) return true;
+
   // Check for hex colors (with or without #)
   // Supports: #RGB, RGB, #RRGGBB, RRGGBB, #RRGGBBAA, RRGGBBAA
   if (/^#?[0-9A-Fa-f]{3}$/.test(value)) return true; // #RGB or RGB
@@ -243,13 +246,13 @@ const CLASS_PROPERTY_MAP: Record<string, RegExp> = {
   backgroundClip: /^bg-clip-(text|border|padding|content)$/,
 
   // Borders
-  borderWidth: /^border(-\d+|-\[(?!#|rgb).+\])?$/,
-  borderTopWidth: /^border-t(-\d+|-\[(?!#|rgb).+\])?$/,
-  borderRightWidth: /^border-r(-\d+|-\[(?!#|rgb).+\])?$/,
-  borderBottomWidth: /^border-b(-\d+|-\[(?!#|rgb).+\])?$/,
-  borderLeftWidth: /^border-l(-\d+|-\[(?!#|rgb).+\])?$/,
+  borderWidth: /^border(-\d+|-\[(?!#|rgb|color:var).+\])?$/,
+  borderTopWidth: /^border-t(-\d+|-\[(?!#|rgb|color:var).+\])?$/,
+  borderRightWidth: /^border-r(-\d+|-\[(?!#|rgb|color:var).+\])?$/,
+  borderBottomWidth: /^border-b(-\d+|-\[(?!#|rgb|color:var).+\])?$/,
+  borderLeftWidth: /^border-l(-\d+|-\[(?!#|rgb|color:var).+\])?$/,
   borderStyle: /^border-(solid|dashed|dotted|double|hidden|none)$/,
-  borderColor: /^border-(?!(?:solid|dashed|dotted|double|hidden|none)$)(?!t-|r-|b-|l-|x-|y-)((\w+)(-\d+)?|\[(?:#|rgb).+\])(\/\d+)?$/,
+  borderColor: /^border-(?!(?:solid|dashed|dotted|double|hidden|none)$)(?!t-|r-|b-|l-|x-|y-)((\w+)(-\d+)?|\[(?:#|rgb|color:var).+\])(\/\d+)?$/,
   borderRadius: /^rounded(-none|-sm|-md|-lg|-xl|-2xl|-3xl|-full|-\[.+\])?$/,
   borderTopLeftRadius: /^rounded-tl(-none|-sm|-md|-lg|-xl|-2xl|-3xl|-full|-\[.+\])?$/,
   borderTopRightRadius: /^rounded-tr(-none|-sm|-md|-lg|-xl|-2xl|-3xl|-full|-\[.+\])?$/,
@@ -257,10 +260,10 @@ const CLASS_PROPERTY_MAP: Record<string, RegExp> = {
   borderBottomLeftRadius: /^rounded-bl(-none|-sm|-md|-lg|-xl|-2xl|-3xl|-full|-\[.+\])?$/,
 
   // Dividers
-  divideX: /^divide-x(-\d+|-\[(?!#|rgb).+\])?$/,
-  divideY: /^divide-y(-\d+|-\[(?!#|rgb).+\])?$/,
+  divideX: /^divide-x(-\d+|-\[(?!#|rgb|color:var).+\])?$/,
+  divideY: /^divide-y(-\d+|-\[(?!#|rgb|color:var).+\])?$/,
   divideStyle: /^divide-(solid|dashed|dotted|double|none)$/,
-  divideColor: /^divide-((\w+)(-\d+)?|\[(?:#|rgb).+\])(\/\d+)?$/,
+  divideColor: /^divide-((\w+)(-\d+)?|\[(?:#|rgb|color:var).+\])(\/\d+)?$/,
 
   // Effects
   opacity: /^opacity-(\d+|\[.+\])$/,
@@ -321,7 +324,7 @@ export function removeConflictingClasses(
 
   return classes.filter(cls => {
     // Strip breakpoint and state prefixes for helper class detection
-    const baseClass = cls.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:)?/, '');
+    const baseClass = cls.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:|current:)?/, '');
 
     // Special handling for text color property
     // Remove gradient-related classes (bg-[gradient], bg-clip-text, text-transparent)
@@ -401,7 +404,7 @@ export function removeConflictingClasses(
  */
 function isStandardColorClass(className: string): boolean {
   // Strip prefixes
-  const baseClass = className.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:)?/, '');
+  const baseClass = className.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:|current:)?/, '');
 
   // Common Tailwind color patterns
   const colorPattern = /^(text|bg|border|ring|outline|decoration|shadow|from|via|to|caret|accent|divide|placeholder)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(-\d+)?$/;
@@ -414,7 +417,7 @@ function isStandardColorClass(className: string): boolean {
  */
 function isArbitraryColorClass(className: string, property: string): boolean {
   // Strip prefixes
-  const baseClass = className.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:)?/, '');
+  const baseClass = className.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:|current:)?/, '');
 
   // Check based on property
   if (property === 'color' && baseClass.startsWith('text-[')) {
@@ -533,6 +536,9 @@ export function propertyToClass(
         if (value === 'none') return 'no-underline';
         return value; // underline, line-through, overline
       case 'textDecorationColor': {
+        if (value.startsWith('color:var(')) {
+          return `decoration-[${value}]`;
+        }
         if (value.match(/^#|^rgb|^hsl/)) {
           const parts = value.split('/');
           if (parts.length === 2) {
@@ -549,9 +555,10 @@ export function propertyToClass(
       case 'color':
         // Check if value is a gradient (linear-gradient or radial-gradient)
         if (value.includes('gradient(')) {
-          // For gradients on text, we need bg-[gradient] + bg-clip-text + text-transparent
-          // Note: This returns space-separated classes that will be split by the caller
           return `bg-[${value}] bg-clip-text text-transparent`;
+        }
+        if (value.startsWith('color:var(')) {
+          return `text-[${value}]`;
         }
         if (value.match(/^#|^rgb/)) {
           // Handle opacity: split "#cc8d8d/59" into "text-[#cc8d8d]/59"
@@ -563,6 +570,9 @@ export function propertyToClass(
         }
         return `text-${value}`;
       case 'placeholderColor':
+        if (value.startsWith('color:var(')) {
+          return `placeholder:text-[${value}]`;
+        }
         if (value.match(/^#|^rgb/)) {
           const parts = value.split('/');
           if (parts.length === 2) {
@@ -616,7 +626,7 @@ export function propertyToClass(
       if (value === '100%') return `${prefix}-full`;
 
       // Use abstracted helper with allowed named values
-      return formatMeasurementClass(value, prefix, ['auto', 'full', 'screen', 'min', 'max', 'fit']);
+      return formatMeasurementClass(value, prefix, ['auto', 'full', 'screen', 'min', 'max', 'fit', 'none']);
     }
 
     // Overflow
@@ -667,6 +677,9 @@ export function propertyToClass(
       case 'borderStyle':
         return `border-${value}`;
       case 'borderColor':
+        if (value.startsWith('color:var(')) {
+          return `border-[${value}]`;
+        }
         if (value.match(/^#|^rgb/)) {
           // Handle opacity: split "#cc8d8d/59" into "border-[#cc8d8d]/59"
           const parts = value.split('/');
@@ -695,6 +708,9 @@ export function propertyToClass(
       case 'divideStyle':
         return `divide-${value}`;
       case 'divideColor':
+        if (value.startsWith('color:var(')) {
+          return `divide-[${value}]`;
+        }
         if (value.match(/^#|^rgb/)) {
           // Handle opacity: split "#cc8d8d/59" into "divide-[#cc8d8d]/59"
           const parts = value.split('/');
@@ -711,6 +727,9 @@ export function propertyToClass(
   if (category === 'backgrounds') {
     switch (property) {
       case 'backgroundColor':
+        if (value.startsWith('color:var(')) {
+          return `bg-[${value}]`;
+        }
         // Gradients and hex/rgb colors need brackets for arbitrary values
         if (value.match(/^#|^rgb|gradient\(/)) {
           // Handle opacity: split "#cc8d8d/59" into "bg-[#cc8d8d]/59"
@@ -837,7 +856,7 @@ export function getAffectedProperties(className: string): string[] {
   const properties: string[] = [];
 
   // Strip breakpoint and state prefixes for helper class detection
-  const baseClass = className.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:)?/, '');
+  const baseClass = className.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:|current:)?/, '');
 
   // bg-clip-* classes affect backgroundClip; bg-clip-text also participates in text gradients
   if (baseClass.startsWith('bg-clip-')) {
@@ -1017,12 +1036,12 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
     // CRITICAL FIX: Skip state-specific classes (they should not be in design object)
     // The design object should only contain base/neutral values
     // State-specific values are handled by getInheritedValue based on activeUIState
-    if (cls.match(/^(hover|focus|active|disabled|visited):/)) {
+    if (cls.match(/^(hover|focus|active|disabled|visited|current):/)) {
       return; // Skip this class
     }
 
     // Also skip breakpoint+state combinations
-    if (cls.match(/^(max-lg|max-md|lg|md):(hover|focus|active|disabled|visited):/)) {
+    if (cls.match(/^(max-lg|max-md|lg|md):(hover|focus|active|disabled|visited|current):/)) {
       return; // Skip this class
     }
 
@@ -1223,39 +1242,77 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
 
     // ===== SIZING =====
     // Width
-    if (cls.startsWith('w-[')) {
-      const value = extractArbitraryValue(cls);
-      if (value) design.sizing!.width = value;
+    if (cls.startsWith('w-')) {
+      if (cls.startsWith('w-[')) {
+        const value = extractArbitraryValue(cls);
+        if (value) design.sizing!.width = value;
+      } else if (cls === 'w-full') {
+        design.sizing!.width = '100%';
+      } else {
+        const value = cls.slice(2); // strip 'w-'
+        if (value) design.sizing!.width = value;
+      }
     }
 
     // Height
-    if (cls.startsWith('h-[')) {
-      const value = extractArbitraryValue(cls);
-      if (value) design.sizing!.height = value;
+    if (cls.startsWith('h-')) {
+      if (cls.startsWith('h-[')) {
+        const value = extractArbitraryValue(cls);
+        if (value) design.sizing!.height = value;
+      } else if (cls === 'h-full') {
+        design.sizing!.height = '100%';
+      } else {
+        const value = cls.slice(2); // strip 'h-'
+        if (value) design.sizing!.height = value;
+      }
     }
 
     // Min Width
-    if (cls.startsWith('min-w-[')) {
-      const value = extractArbitraryValue(cls);
-      if (value) design.sizing!.minWidth = value;
+    if (cls.startsWith('min-w-')) {
+      if (cls.startsWith('min-w-[')) {
+        const value = extractArbitraryValue(cls);
+        if (value) design.sizing!.minWidth = value;
+      } else {
+        const value = cls.slice(6); // strip 'min-w-'
+        if (value === 'full') design.sizing!.minWidth = '100%';
+        else if (value) design.sizing!.minWidth = value;
+      }
     }
 
     // Min Height
-    if (cls.startsWith('min-h-[')) {
-      const value = extractArbitraryValue(cls);
-      if (value) design.sizing!.minHeight = value;
+    if (cls.startsWith('min-h-')) {
+      if (cls.startsWith('min-h-[')) {
+        const value = extractArbitraryValue(cls);
+        if (value) design.sizing!.minHeight = value;
+      } else {
+        const value = cls.slice(6); // strip 'min-h-'
+        if (value === 'full') design.sizing!.minHeight = '100%';
+        else if (value) design.sizing!.minHeight = value;
+      }
     }
 
     // Max Width
-    if (cls.startsWith('max-w-[')) {
-      const value = extractArbitraryValue(cls);
-      if (value) design.sizing!.maxWidth = value;
+    if (cls.startsWith('max-w-')) {
+      if (cls.startsWith('max-w-[')) {
+        const value = extractArbitraryValue(cls);
+        if (value) design.sizing!.maxWidth = value;
+      } else {
+        const value = cls.slice(6); // strip 'max-w-'
+        if (value === 'full') design.sizing!.maxWidth = '100%';
+        else if (value) design.sizing!.maxWidth = value;
+      }
     }
 
     // Max Height
-    if (cls.startsWith('max-h-[')) {
-      const value = extractArbitraryValue(cls);
-      if (value) design.sizing!.maxHeight = value;
+    if (cls.startsWith('max-h-')) {
+      if (cls.startsWith('max-h-[')) {
+        const value = extractArbitraryValue(cls);
+        if (value) design.sizing!.maxHeight = value;
+      } else {
+        const value = cls.slice(6); // strip 'max-h-'
+        if (value === 'full') design.sizing!.maxHeight = '100%';
+        else if (value) design.sizing!.maxHeight = value;
+      }
     }
 
     // Aspect Ratio
@@ -1334,7 +1391,7 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
     if (cls === 'border-none') design.borders!.borderStyle = 'none';
 
     // Border Color
-    if (cls.startsWith('border-[#') || cls.startsWith('border-[rgb')) {
+    if (cls.startsWith('border-[#') || cls.startsWith('border-[rgb') || cls.startsWith('border-[color:var(')) {
       const value = extractArbitraryValueWithOpacity(cls);
       if (value) design.borders!.borderColor = value;
     }
@@ -1363,14 +1420,14 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
     if (cls === 'divide-none') design.borders!.divideStyle = 'none';
 
     // Divide Color
-    if (cls.startsWith('divide-[#') || cls.startsWith('divide-[rgb')) {
+    if (cls.startsWith('divide-[#') || cls.startsWith('divide-[rgb') || cls.startsWith('divide-[color:var(')) {
       const value = extractArbitraryValueWithOpacity(cls);
       if (value) design.borders!.divideColor = value;
     }
 
     // ===== BACKGROUNDS =====
     // Background Color
-    if (cls.startsWith('bg-[#') || cls.startsWith('bg-[rgb')) {
+    if (cls.startsWith('bg-[#') || cls.startsWith('bg-[rgb') || cls.startsWith('bg-[color:var(')) {
       const value = extractArbitraryValueWithOpacity(cls);
       if (value) design.backgrounds!.backgroundColor = value;
     }
@@ -1472,7 +1529,7 @@ export const UI_STATE_CONFIG = {
   focus: { prefix: 'focus:' },
   active: { prefix: 'active:' },
   disabled: { prefix: 'disabled:' },
-  current: { prefix: 'visited:' }, // Tailwind uses 'visited' for current/visited state
+  current: { prefix: 'current:' },
 } as const;
 
 /**
@@ -1524,6 +1581,9 @@ export function parseFullClass(className: string): {
   } else if (remaining.startsWith('disabled:')) {
     uiState = 'disabled';
     remaining = remaining.slice(9);
+  } else if (remaining.startsWith('current:')) {
+    uiState = 'current';
+    remaining = remaining.slice(8);
   } else if (remaining.startsWith('visited:')) {
     uiState = 'current';
     remaining = remaining.slice(8);
@@ -1621,7 +1681,7 @@ function isImageValue(value: string): boolean {
  */
 function shouldIncludeClassForProperty(className: string, property: string, pattern: RegExp): boolean {
   // Strip breakpoint and state prefixes for helper class detection
-  const baseClass = className.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:)?/, '');
+  const baseClass = className.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:|current:)?/, '');
 
   // Special handling for text color property
   // Include gradient-related classes (bg-[gradient], text-transparent) but NOT bg-clip-text
@@ -1793,12 +1853,12 @@ export function getInheritedValue(
         if (!cls.startsWith(bpPrefix)) return false;
         const afterBp = cls.slice(bpPrefix.length);
         // Must not have a state prefix
-        if (afterBp.match(/^(hover|focus|active|disabled|visited):/)) return false;
+        if (afterBp.match(/^(hover|focus|active|disabled|visited|current):/)) return false;
         // Smart filtering for text-[...] classes
         return shouldIncludeClassForProperty(afterBp, property, pattern);
       } else {
         // Desktop: no breakpoint prefix, no state prefix
-        if (cls.match(/^(max-lg|max-md|hover|focus|active|disabled|visited):/)) return false;
+        if (cls.match(/^(max-lg|max-md|hover|focus|active|disabled|visited|current):/)) return false;
         // Smart filtering for text-[...] classes
         return shouldIncludeClassForProperty(cls, property, pattern);
       }
@@ -1973,7 +2033,7 @@ export function getRemovedPropertyClasses(
           // Find all style classes that match this property pattern
           for (const styleClass of styleClasses) {
             // Strip prefixes for pattern matching
-            const baseClass = styleClass.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:)?/, '');
+            const baseClass = styleClass.replace(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|visited:|current:)?/, '');
 
             // Special handling for text-[...] classes
             if (baseClass.startsWith('text-[')) {

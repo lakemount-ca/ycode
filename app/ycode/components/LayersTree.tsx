@@ -13,11 +13,12 @@
  */
 
 // 1. React/Next.js
-import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useCallback, useEffect, useRef, useLayoutEffect } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 // 2. External libraries
 import { DndContext, DragOverlay, DragStartEvent, DragEndEvent, DragOverEvent, PointerSensor, useSensor, useSensors, closestCenter, useDraggable, useDroppable } from '@dnd-kit/core';
-import { Layers as LayersIcon, Component as ComponentIcon, EyeOff } from 'lucide-react';
+import { Layers as LayersIcon, Component as ComponentIcon } from 'lucide-react';
 
 // 4. Internal components
 import LayerContextMenu from './LayerContextMenu';
@@ -27,17 +28,20 @@ import { useEditorStore } from '@/stores/useEditorStore';
 import { useLayerStylesStore } from '@/stores/useLayerStylesStore';
 import { useComponentsStore } from '@/stores/useComponentsStore';
 import { useCollectionsStore } from '@/stores/useCollectionsStore';
+import { usePagesStore } from '@/stores/usePagesStore';
 import { useCollaborationPresenceStore, getResourceLockKey, RESOURCE_TYPES } from '@/stores/useCollaborationPresenceStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 
 // 6. Utils/lib
 import { cn } from '@/lib/utils';
 import { flattenTree, type FlattenedItem } from '@/lib/tree-utilities';
-import { canHaveChildren, getLayerIcon, getLayerName, getCollectionVariable, canMoveLayer } from '@/lib/layer-utils';
+import { canHaveChildren, getLayerIcon, getLayerName, getCollectionVariable, isTextContentLayer, isRichTextLayer, getRichTextSublayers, getTextStyleSublayers, canMoveLayer, updateLayerProps, filterDisabledSliderLayers, getLayerCmsFieldBinding, extractBlockText } from '@/lib/layer-utils';
+import { getBlockName } from '@/lib/templates/blocks';
 import { MULTI_ASSET_COLLECTION_ID } from '@/lib/collection-field-utils';
 import { hasStyleOverrides } from '@/lib/layer-style-utils';
 import { getUserInitials, getDisplayName } from '@/lib/collaboration-utils';
 import { getBreakpointPrefix } from '@/lib/breakpoint-utils';
+import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { CollaboratorBadge } from '@/components/collaboration/CollaboratorBadge';
 import { DropLineIndicator, DropContainerIndicator } from '@/components/DropIndicators';
@@ -49,32 +53,8 @@ import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-u
 import Icon from '@/components/ui/icon';
 
 /**
- * Extract plain text from Tiptap JSON content (for rich text layers)
- */
-function extractPlainTextFromTiptap(content: any): string {
-  if (!content) return '';
-
-  // If it's a string, return as-is
-  if (typeof content === 'string') return content;
-
-  // If it's an array, process each item
-  if (Array.isArray(content)) {
-    return content.map(extractPlainTextFromTiptap).join('');
-  }
-
-  // If it has text property, return it
-  if (content.text) return content.text;
-
-  // If it has content array, recursively extract
-  if (content.content) {
-    return extractPlainTextFromTiptap(content.content);
-  }
-
-  return '';
-}
-
-/**
- * Get display label for a layer - returns text content for text layers, otherwise layer name
+ * Get display label for a layer - returns text content for text layers, otherwise layer name.
+ * Uses extractBlockText (same function that powers RichText sublayer labels).
  */
 function getLayerDisplayLabel(
   layer: Layer,
@@ -85,28 +65,37 @@ function getLayerDisplayLabel(
   },
   breakpoint?: Breakpoint
 ): string {
-  // For text layers, try to show the actual text content
-  if (layer.name === 'text' && layer.variables?.text) {
-    const textVar = layer.variables.text as { type: string; data?: { content?: any } };
+  // For text content layers (heading/text), skip customName early return if it matches
+  // the default block name so we can show actual text content instead.
+  // Rich Text parent elements always use their static label.
+  const isTextLayer = isTextContentLayer(layer);
+  const hasUserRename = layer.customName && layer.customName !== (getBlockName(layer.name) || '');
 
-    let textContent = '';
-    if (textVar.type === 'dynamic_rich_text' && textVar.data?.content) {
-      textContent = extractPlainTextFromTiptap(textVar.data.content);
-    } else if ((textVar.type === 'dynamic_text' || textVar.type === 'static_text') && textVar.data?.content) {
-      textContent = String(textVar.data.content);
-    }
+  if (hasUserRename) {
+    return layer.customName!;
+  }
 
-    // Trim and truncate long text, return if we have content
-    if (textContent) {
+  if (!isTextLayer && layer.customName) {
+    return layer.customName;
+  }
+
+  if (isTextLayer) {
+    const textVar = layer.variables?.text as { type: string; data?: { content?: unknown } } | undefined;
+    if (textVar) {
+      let textContent = '';
+      if (textVar.type === 'dynamic_rich_text' && textVar.data?.content) {
+        textContent = extractBlockText(textVar.data.content);
+      } else if ((textVar.type === 'dynamic_text' || textVar.type === 'static_text') && textVar.data?.content) {
+        textContent = String(textVar.data.content);
+      }
+
       const trimmed = textContent.trim();
       if (trimmed) {
-        // Truncate to ~30 chars for display
         return trimmed.length > 30 ? trimmed.slice(0, 30) + '...' : trimmed;
       }
     }
   }
 
-  // Fall back to regular layer name
   return getLayerName(layer, context, breakpoint);
 }
 
@@ -124,24 +113,28 @@ interface LayersTreeProps {
 interface LayerRowProps {
   node: FlattenedItem;
   isSelected: boolean;
-  isChildOfSelected: boolean; // New: indicates this is a child of selected parent
-  isLastVisibleDescendant: boolean; // New: last visible descendant of selected parent
-  hasVisibleChildren: boolean; // New: has visible children
-  canHaveChildren: boolean; // Pre-calculated from node.canHaveChildren
+  isChildOfSelected: boolean;
+  isLastVisibleDescendant: boolean;
+  hasVisibleChildren: boolean;
+  canHaveChildren: boolean;
   isOver: boolean;
   isDragging: boolean;
   isDragActive: boolean;
   dropPosition: 'above' | 'below' | 'inside' | null;
-  highlightedDepths: Set<number>; // Depths that should be highlighted
+  highlightedDepths: Set<number>;
   onSelect: (id: string) => void;
   onMultiSelect: (id: string, modifiers: { meta: boolean; shift: boolean }) => void;
   onToggle: (id: string) => void;
   pageId: string;
-  selectedLayerId: string | null; // Added for context menu
+  selectedLayerId: string | null;
   liveLayerUpdates?: UseLiveLayerUpdatesReturn | null;
   liveComponentUpdates?: UseLiveComponentUpdatesReturn | null;
-  scrollToSelected?: boolean; // New: trigger scroll when selected
-  activeBreakpoint: Breakpoint; // For breakpoint-aware icons and names
+  scrollToSelected?: boolean;
+  activeBreakpoint: Breakpoint;
+  isRenaming: boolean;
+  onRenameStart: (id: string) => void;
+  onRenameConfirm: (id: string, newName: string | null) => void;
+  onToggleVisibility: (id: string) => void;
 }
 
 // Helper to check if a node is a descendant of another
@@ -181,6 +174,10 @@ const LayerRow = React.memo(function LayerRow({
   liveComponentUpdates,
   scrollToSelected,
   activeBreakpoint,
+  isRenaming,
+  onRenameStart,
+  onRenameConfirm,
+  onToggleVisibility,
 }: LayerRowProps) {
   const getStyleById = useLayerStylesStore((state) => state.getStyleById);
   const getComponentById = useComponentsStore((state) => state.getComponentById);
@@ -188,6 +185,7 @@ const LayerRow = React.memo(function LayerRow({
   const fieldsByCollectionId = useCollectionsStore((state) => state.fields);
 
   // Use selective subscriptions to avoid re-renders when unrelated state changes
+  const selectLayerWithSublayer = useEditorStore((state) => state.selectLayerWithSublayer);
   const editingComponentId = useEditorStore((state) => state.editingComponentId);
   const interactionTriggerLayerIds = useEditorStore((state) => state.interactionTriggerLayerIds);
   const interactionTargetLayerIds = useEditorStore((state) => state.interactionTargetLayerIds);
@@ -200,10 +198,36 @@ const LayerRow = React.memo(function LayerRow({
 
   const { attributes, listeners, setNodeRef: setDragRef } = useDraggable({
     id: node.id,
+    disabled: isRenaming,
   });
 
   // Ref for scrolling to this element
   const rowRef = React.useRef<HTMLDivElement>(null);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
+  const renameReadyRef = React.useRef(false);
+
+  // Focus input when rename mode activates
+  React.useEffect(() => {
+    if (isRenaming) {
+      renameReadyRef.current = false;
+      const tryFocus = () => {
+        if (renameInputRef.current && document.activeElement !== renameInputRef.current) {
+          renameInputRef.current.focus();
+          const len = renameInputRef.current.value.length;
+          renameInputRef.current.setSelectionRange(len, len);
+        }
+        if (document.activeElement === renameInputRef.current) {
+          renameReadyRef.current = true;
+        }
+      };
+      tryFocus();
+      const t1 = setTimeout(tryFocus, 50);
+      const t2 = setTimeout(tryFocus, 150);
+      return () => { clearTimeout(t1); clearTimeout(t2); renameReadyRef.current = false; };
+    } else {
+      renameReadyRef.current = false;
+    }
+  }, [isRenaming]);
 
   // Combine refs for drag and drop
   const setRefs = (element: HTMLDivElement | null) => {
@@ -242,7 +266,10 @@ const LayerRow = React.memo(function LayerRow({
   // Component instances should not show children in the tree (unless editing master)
   // Children can only be edited via "Edit master component"
   const shouldHideChildren = isComponentInstance && !editingComponentId;
-  const effectiveHasChildren = hasChildren && !shouldHideChildren;
+  const hasContentSublayers = isRichTextLayer(node.layer) && getRichTextSublayers(node.layer).length > 0;
+  const hasStyleSublayers = isTextContentLayer(node.layer) && getTextStyleSublayers(node.layer).length > 0;
+  const hasSublayers = hasContentSublayers || hasStyleSublayers;
+  const effectiveHasChildren = (hasChildren && !shouldHideChildren) || hasSublayers;
 
   // Use purple ONLY for component instances (not for all layers when editing a component)
   const usePurpleStyle = isComponentInstance;
@@ -263,6 +290,90 @@ const LayerRow = React.memo(function LayerRow({
 
   // Check if this is the Body layer (locked)
   const isLocked = node.layer.id === 'body';
+
+  // Sublayer rows (content blocks or text style targets)
+  if (node.sublayer) {
+    const handleSublayerClick = () => {
+      if (node.sublayer!.kind === 'content') {
+        selectLayerWithSublayer(node.layer.id, {
+          textStyleKey: node.sublayer!.styleKey ?? null,
+          sublayerIndex: node.index,
+          listItemIndex: null,
+        });
+      } else if (node.sublayer!.kind === 'listItem') {
+        const parentBlockIdx = node.parentId?.match(/__sub_(\d+)$/)?.[1];
+        selectLayerWithSublayer(node.layer.id, {
+          textStyleKey: 'listItem',
+          sublayerIndex: parentBlockIdx !== undefined ? parseInt(parentBlockIdx, 10) : node.index,
+          listItemIndex: node.sublayer!.itemIndex ?? null,
+        });
+      } else {
+        selectLayerWithSublayer(node.layer.id, {
+          textStyleKey: node.sublayer!.styleKey ?? null,
+          sublayerIndex: null,
+          listItemIndex: null,
+        });
+      }
+    };
+
+    const hasExpandableChildren = node.canHaveChildren;
+    const isSubCollapsed = node.collapsed || false;
+
+    return (
+      <div className="relative">
+        {node.depth > 0 && (
+          <>
+            {Array.from({ length: node.depth }).map((_, i) => (
+              <div
+                key={i}
+                className={cn(
+                  'absolute z-10 top-0 bottom-0 w-px',
+                  (isChildOfSelected || isSelected) ? 'dark:bg-white/10 bg-neutral-900/10' : 'dark:bg-secondary bg-neutral-900/10',
+                )}
+                style={{ left: `${i * 14 + 16}px` }}
+              />
+            ))}
+          </>
+        )}
+        <div
+          className={cn(
+            'group relative flex items-center h-8 cursor-pointer',
+            isSelected && 'bg-primary text-primary-foreground rounded-lg',
+            !isSelected && isChildOfSelected && 'dark:bg-primary/15 bg-primary/10 text-current/70',
+            !isSelected && isChildOfSelected && isLastVisibleDescendant && 'rounded-b-lg',
+            !isSelected && isChildOfSelected && !isLastVisibleDescendant && 'rounded-none',
+            !isSelected && !isChildOfSelected && 'rounded-lg text-secondary-foreground/80 dark:text-muted-foreground',
+          )}
+          style={{ paddingLeft: `${node.depth * 14 + 8}px` }}
+          onClick={handleSublayerClick}
+        >
+          {hasExpandableChildren ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle(node.id);
+              }}
+              className={cn(
+                'w-4 h-4 flex items-center justify-center shrink-0',
+                isSubCollapsed ? '' : 'rotate-90',
+              )}
+            >
+              <Icon name="chevronRight" className={cn('size-2.5 opacity-50', isSelected && 'opacity-80')} />
+            </button>
+          ) : (
+            <div className="w-4 h-4 shrink-0" />
+          )}
+          <Icon
+            name={node.sublayer.icon as any}
+            className={cn('size-3 mx-1.5 shrink-0', isSelected ? 'opacity-70' : 'opacity-40')}
+          />
+          <span className={cn('text-2xs truncate select-none', isSelected ? 'opacity-90' : 'opacity-60')}>
+            {node.sublayer.label}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <LayerContextMenu
@@ -314,8 +425,8 @@ const LayerRow = React.memo(function LayerRow({
         {/* Main Row */}
         <div
           ref={setRefs}
-          {...attributes}
-          {...listeners}
+          {...(isRenaming ? {} : attributes)}
+          {...(isRenaming ? {} : listeners)}
           data-drag-active={isDragActive}
           data-layer-id={node.id}
           className={cn(
@@ -352,6 +463,7 @@ const LayerRow = React.memo(function LayerRow({
             setHoveredLayerId(null);
           }}
           onClick={(e) => {
+            if (isRenaming) return;
             // Block click if layer is locked by another user
             if (isLockedByOther) {
               e.stopPropagation();
@@ -362,8 +474,8 @@ const LayerRow = React.memo(function LayerRow({
             onSelect(node.id);
           }}
         >
-          {/* Expand/Collapse Button - only show for elements that can have children */}
-          {node.canHaveChildren ? (
+          {/* Expand/Collapse Button - show for elements that can have children or richText sublayers */}
+          {(node.canHaveChildren || hasSublayers) ? (
             effectiveHasChildren ? (
               <button
                 onClick={(e) => {
@@ -410,14 +522,54 @@ const LayerRow = React.memo(function LayerRow({
             />
           )}
 
-          {/* Label (breakpoint-aware for layout layers, text content for text layers) */}
-          <span className="grow text-xs font-medium overflow-hidden text-ellipsis whitespace-nowrap pointer-events-none">
-            {getLayerDisplayLabel(node.layer, {
-              component_name: appliedComponent?.name,
-              collection_name: finalCollectionName,
-              source_field_name: sourceFieldName ?? undefined,
-            }, activeBreakpoint)}
-          </span>
+          {/* Label / Inline Rename Input */}
+          {isRenaming ? (
+            <Input
+              ref={renameInputRef}
+              variant="rename-selected"
+              data-renaming
+              className="grow mr-2"
+              defaultValue={node.layer.customName || ''}
+              placeholder={getLayerDisplayLabel({ ...node.layer, customName: undefined }, {
+                component_name: appliedComponent?.name,
+                collection_name: finalCollectionName,
+                source_field_name: sourceFieldName ?? undefined,
+              }, activeBreakpoint)}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onBlur={(e) => {
+                if (!renameReadyRef.current) return;
+                const val = e.currentTarget.value.trim();
+                onRenameConfirm(node.id, val || null);
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  const val = (e.target as HTMLInputElement).value.trim();
+                  onRenameConfirm(node.id, val || null);
+                } else if (e.key === 'Escape') {
+                  onRenameConfirm(node.id, node.layer.customName || null);
+                }
+              }}
+            />
+          ) : (
+            <span
+              className="grow text-xs font-medium overflow-hidden text-ellipsis whitespace-nowrap select-none"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (node.id !== 'body') {
+                  onRenameStart(node.id);
+                }
+              }}
+            >
+              {getLayerDisplayLabel(node.layer, {
+                component_name: appliedComponent?.name,
+                collection_name: finalCollectionName,
+                source_field_name: sourceFieldName ?? undefined,
+              }, activeBreakpoint)}
+            </span>
+          )}
 
           {/* Lock Indicator - show when layer is locked by another user */}
           {isLockedByOther && (
@@ -469,15 +621,34 @@ const LayerRow = React.memo(function LayerRow({
             />
           )}
 
-          {/* Hidden indicator */}
-          {node.layer.settings?.hidden && (
-            <Icon
-              name="eye-off"
+          {/* Visibility toggle */}
+          {node.id !== 'body' && !isRenaming && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleVisibility(node.id);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
               className={cn(
-                'size-3 mr-3 opacity-50',
-                isSelected && 'opacity-100',
+                'size-6 flex items-center justify-center shrink-0 mr-1 rounded cursor-pointer',
+                node.layer.settings?.hidden
+                  ? cn(
+                    'opacity-60',
+                    isSelected ? 'opacity-80 hover:opacity-100' : 'hover:opacity-100'
+                  )
+                  : cn(
+                    'opacity-0 group-hover:opacity-40',
+                    isSelected ? 'group-hover:opacity-60' : '',
+                    'hover:!opacity-100'
+                  ),
               )}
-            />
+              aria-label={node.layer.settings?.hidden ? 'Show element' : 'Hide element'}
+            >
+              <Icon
+                name={node.layer.settings?.hidden ? 'eye-off' : 'eye'}
+                className="size-3"
+              />
+            </button>
           )}
         </div>
       </div>
@@ -614,13 +785,26 @@ export default function LayersTree({
   const [shouldScrollToSelected, setShouldScrollToSelected] = useState(false);
 
   // Pull multi-select state and breakpoint from editor store
-  const { selectedLayerIds: storeSelectedLayerIds, lastSelectedLayerId, toggleSelection, selectRange, editingComponentId, activeBreakpoint } = useEditorStore();
+  const { selectedLayerIds: storeSelectedLayerIds, lastSelectedLayerId, toggleSelection, selectRange, editingComponentId, activeBreakpoint, activeSublayerIndex: storeActiveSublayerIndex, activeTextStyleKey: storeActiveTextStyleKey, activeListItemIndex: storeActiveListItemIndex } = useEditorStore();
 
   // Get component by ID function for drag overlay
   const { getComponentById } = useComponentsStore();
 
   // Get collections and fields from store
-  const { collections, fields: fieldsByCollectionId } = useCollectionsStore();
+  const { collections, fields: fieldsByCollectionId, items: collectionItems } = useCollectionsStore();
+
+  // CMS data for resolving rich text sublayers from actual CMS item content
+  const currentPageCollectionItemId = useEditorStore((state) => state.currentPageCollectionItemId);
+  const pages = usePagesStore((state) => state.pages);
+  const currentPage = useMemo(() => pages.find(p => p.id === pageId), [pages, pageId]);
+  const pageCollectionId = currentPage?.is_dynamic ? currentPage.settings?.cms?.collection_id ?? null : null;
+  const pageCollectionItemValues = useMemo(() => {
+    if (!pageCollectionId || !currentPageCollectionItemId) return null;
+    const items = collectionItems[pageCollectionId];
+    if (!items) return null;
+    const item = items.find(i => i.id === currentPageCollectionItemId);
+    return item?.values ?? null;
+  }, [pageCollectionId, currentPageCollectionItemId, collectionItems]);
 
   // Use prop or store state (prop takes precedence for compatibility)
   const selectedLayerIds = propSelectedLayerIds ?? storeSelectedLayerIds;
@@ -628,7 +812,8 @@ export default function LayersTree({
   // Flatten the tree for rendering (sorted by CSS order on responsive breakpoints)
   const flattenedNodes = useMemo(
     () => {
-      const flattened = flattenTree(layers, null, 0, collapsedIds, activeBreakpoint);
+      const visibleLayers = filterDisabledSliderLayers(layers);
+      const flattened = flattenTree(visibleLayers, null, 0, collapsedIds, activeBreakpoint);
 
       // Validate no duplicate IDs in flattened array
       if (process.env.NODE_ENV === 'development') {
@@ -677,9 +862,83 @@ export default function LayersTree({
         }
       }
 
-      return flattened;
+      // Inject sublayer nodes for expanded text elements
+      const withSublayers: FlattenedItem[] = [];
+      for (const node of flattened) {
+        withSublayers.push(node);
+        if (!collapsedIds.has(node.id)) {
+          let subIdx = 0;
+
+          // Content sublayers (TipTap blocks) for richText
+          // Each content block may have inline mark children (bold, italic, etc.)
+          if (isRichTextLayer(node.layer)) {
+            let cmsContent: any = undefined;
+            const cmsBinding = getLayerCmsFieldBinding(node.layer);
+            if (cmsBinding && pageCollectionItemValues) {
+              const rawValue = pageCollectionItemValues[cmsBinding.field_id];
+              if (rawValue) cmsContent = rawValue;
+            }
+            const contentSubs = getRichTextSublayers(node.layer, cmsContent);
+            contentSubs.forEach((sub) => {
+              const contentSubId = `${node.id}__sub_${subIdx}`;
+              const hasMarkChildren = sub.children && sub.children.length > 0;
+
+              withSublayers.push({
+                id: contentSubId,
+                layer: node.layer,
+                depth: node.depth + 1,
+                parentId: node.id,
+                index: subIdx,
+                collapsed: hasMarkChildren ? collapsedIds.has(contentSubId) : undefined,
+                canHaveChildren: !!hasMarkChildren,
+                sublayer: sub,
+              });
+              subIdx++;
+
+              // Nest child sublayers (list items, inline marks) under expanded content blocks
+              if (hasMarkChildren && !collapsedIds.has(contentSubId)) {
+                let itemIdx = 0;
+                sub.children!.forEach((childSub) => {
+                  const childId = childSub.kind === 'listItem'
+                    ? `${contentSubId}__item_${itemIdx++}`
+                    : `${contentSubId}__mark_${childSub.styleKey}`;
+                  withSublayers.push({
+                    id: childId,
+                    layer: node.layer,
+                    depth: node.depth + 2,
+                    parentId: contentSubId,
+                    index: subIdx,
+                    canHaveChildren: false,
+                    sublayer: childSub,
+                  });
+                  subIdx++;
+                });
+              }
+            });
+          }
+
+          // Style sublayers for text/heading only (richText nests them under content blocks)
+          if (isTextContentLayer(node.layer)) {
+            const styleSubs = getTextStyleSublayers(node.layer);
+            styleSubs.forEach((sub) => {
+              withSublayers.push({
+                id: `${node.id}__style_${sub.styleKey}`,
+                layer: node.layer,
+                depth: node.depth + 1,
+                parentId: node.id,
+                index: subIdx,
+                canHaveChildren: false,
+                sublayer: sub,
+              });
+              subIdx++;
+            });
+          }
+        }
+      }
+
+      return withSublayers;
     },
-    [layers, collapsedIds, activeBreakpoint]
+    [layers, collapsedIds, activeBreakpoint, pageCollectionItemValues]
   );
 
   // Calculate which depth levels should be highlighted (selected containers)
@@ -715,6 +974,50 @@ export default function LayersTree({
       : undefined;
     return { collection_name: collectionName, source_field_name: sourceFieldName };
   }, [activeNode, collections, fieldsByCollectionId]);
+
+  // Inline rename handlers
+  const renamingLayerId = useEditorStore((state) => state.renamingLayerId);
+  const setRenamingLayerId = useEditorStore((state) => state.setRenamingLayerId);
+  const updateLayer = usePagesStore((state) => state.updateLayer);
+  const updateComponentDraft = useComponentsStore((state) => state.updateComponentDraft);
+
+  const handleRenameStart = useCallback((id: string) => {
+    setRenamingLayerId(id);
+  }, [setRenamingLayerId]);
+
+  const handleRenameConfirm = useCallback((id: string, newName: string | null) => {
+    const value = newName || undefined;
+
+    // Update layer first so the label shows the new name immediately
+    if (editingComponentId) {
+      const { componentDrafts } = useComponentsStore.getState();
+      const compLayers = componentDrafts[editingComponentId] || [];
+      updateComponentDraft(editingComponentId, updateLayerProps(compLayers, id, { customName: value }));
+    } else {
+      updateLayer(pageId, id, { customName: value });
+    }
+
+    setRenamingLayerId(null);
+  }, [editingComponentId, pageId, updateLayer, updateComponentDraft, setRenamingLayerId]);
+
+  const handleToggleVisibility = useCallback((id: string) => {
+    const node = flattenedNodes.find(n => n.id === id);
+    if (!node) return;
+
+    const currentSettings = node.layer.settings || {};
+    const newHidden = !currentSettings.hidden;
+    const updates: Partial<Layer> = {
+      settings: { ...currentSettings, hidden: newHidden }
+    };
+
+    if (editingComponentId) {
+      const { componentDrafts } = useComponentsStore.getState();
+      const compLayers = componentDrafts[editingComponentId] || [];
+      updateComponentDraft(editingComponentId, updateLayerProps(compLayers, id, updates));
+    } else {
+      updateLayer(pageId, id, updates);
+    }
+  }, [editingComponentId, pageId, updateLayer, updateComponentDraft, flattenedNodes]);
 
   // Configure sensors for drag detection
   const sensors = useSensors(
@@ -889,6 +1192,41 @@ export default function LayersTree({
     }
   }, [shouldScrollToSelected]);
 
+  // Virtualizer: discover the nearest scroll-container ancestor
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    let el = wrapperRef.current?.parentElement ?? null;
+    while (el) {
+      const style = getComputedStyle(el);
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        scrollContainerRef.current = el;
+        return;
+      }
+      el = el.parentElement;
+    }
+  }, []);
+
+  const ROW_HEIGHT = 32;
+
+  const virtualizer = useVirtualizer({
+    count: flattenedNodes.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 20,
+  });
+
+  // Scroll to selected layer using the virtualizer
+  useEffect(() => {
+    if (shouldScrollToSelected && selectedLayerId) {
+      const idx = flattenedNodes.findIndex(n => n.id === selectedLayerId);
+      if (idx >= 0) {
+        virtualizer.scrollToIndex(idx, { align: 'center' });
+      }
+    }
+  }, [shouldScrollToSelected, selectedLayerId, flattenedNodes, virtualizer]);
+
   // Pull hover state management from editor store
   const { setHoveredLayerId: setHoveredLayerIdFromStore } = useEditorStore();
 
@@ -901,6 +1239,8 @@ export default function LayersTree({
 
     const draggedId = event.active.id as string;
     const draggedNode = flattenedNodes.find(n => n.id === draggedId);
+
+    if (draggedNode?.sublayer) return;
 
     // Clear hover state when dragging starts
     setHoveredLayerIdFromStore(null);
@@ -1399,9 +1739,12 @@ export default function LayersTree({
       return next;
     });
 
-    // Persist the change to the layer tree (outside of setState)
-    const updatedLayers = updateLayerOpenState(layers, id, willBeOpen);
-    onReorder(updatedLayers);
+    // Only persist for real layers (virtual sublayer nodes are local UI state only)
+    const isVirtualNode = id.includes('__sub_') || id.includes('__style_') || id.includes('__mark_') || id.includes('__item_');
+    if (!isVirtualNode) {
+      const updatedLayers = updateLayerOpenState(layers, id, willBeOpen);
+      onReorder(updatedLayers);
+    }
   }, [layers, onReorder, collapsedIds]);
 
   // Handle layer selection
@@ -1417,15 +1760,48 @@ export default function LayersTree({
     const selectedIdsSet = new Set(selectedLayerIds);
     if (selectedLayerId) selectedIdsSet.add(selectedLayerId);
 
+    // When a sublayer (content or style) is active, treat it as selected
+    // and demote the parent layer to "has selected child"
+    const hasContentSublayerActive = storeActiveSublayerIndex !== null && selectedLayerId !== null;
+    const hasStyleSublayerActive = storeActiveTextStyleKey !== null && selectedLayerId !== null;
+    const hasSublayerActive = hasContentSublayerActive || hasStyleSublayerActive;
+    let activeSublayerNodeId: string | null = null;
+
+    if (hasContentSublayerActive && storeActiveTextStyleKey === 'listItem' && storeActiveListItemIndex !== null) {
+      const listItemMatch = flattenedNodes.find(
+        n => n.sublayer && n.sublayer.kind === 'listItem' && n.sublayer.itemIndex === storeActiveListItemIndex
+          && n.layer.id === selectedLayerId
+          && n.parentId?.endsWith(`__sub_${storeActiveSublayerIndex}`)
+      );
+      activeSublayerNodeId = listItemMatch?.id ?? null;
+    } else if (hasContentSublayerActive) {
+      const contentMatch = flattenedNodes.find(
+        n => n.sublayer && n.sublayer.kind === 'content' && n.parentId === selectedLayerId && n.index === storeActiveSublayerIndex
+      );
+      activeSublayerNodeId = contentMatch?.id ?? null;
+    } else if (hasStyleSublayerActive) {
+      // Direct style sublayers (text/heading) or nested mark sublayers
+      activeSublayerNodeId = flattenedNodes.find(
+        n => n.sublayer && n.sublayer.kind === 'style' && n.sublayer.styleKey === storeActiveTextStyleKey && n.layer.id === selectedLayerId
+      )?.id ?? null;
+    }
+
     // Build a parent lookup map for O(1) access
     const nodeById = new Map<string, FlattenedItem>();
     flattenedNodes.forEach(node => nodeById.set(node.id, node));
+
+    // Effective selected set: exclude the parent layer when a sublayer is active
+    const effectiveSelectedSet = new Set(selectedIdsSet);
+    if (hasSublayerActive && activeSublayerNodeId) {
+      effectiveSelectedSet.delete(selectedLayerId!);
+      effectiveSelectedSet.add(activeSublayerNodeId);
+    }
 
     // For each node, compute: isChildOfSelected, parentSelectedId
     const childOfSelectedMap = new Map<string, string | null>(); // nodeId -> parentSelectedId
 
     flattenedNodes.forEach(node => {
-      if (selectedIdsSet.has(node.id)) {
+      if (effectiveSelectedSet.has(node.id)) {
         childOfSelectedMap.set(node.id, null); // Selected nodes are not "child of selected"
         return;
       }
@@ -1433,7 +1809,7 @@ export default function LayersTree({
       // Walk up parent chain to see if any ancestor is selected
       let current: FlattenedItem | undefined = node;
       while (current && current.parentId) {
-        if (selectedIdsSet.has(current.parentId)) {
+        if (effectiveSelectedSet.has(current.parentId)) {
           childOfSelectedMap.set(node.id, current.parentId);
           return;
         }
@@ -1445,7 +1821,7 @@ export default function LayersTree({
     // Find last visible descendants for each selected parent
     const lastDescendantMap = new Map<string, string>(); // parentSelectedId -> lastDescendantId
 
-    selectedIdsSet.forEach(selectedId => {
+    effectiveSelectedSet.forEach(selectedId => {
       // Find all descendants of this selected node
       const descendants: string[] = [];
       flattenedNodes.forEach(node => {
@@ -1471,12 +1847,23 @@ export default function LayersTree({
       const isChildOfSelected = parentSelectedId !== null;
       const isLastVisibleDescendant = parentSelectedId !== null &&
         lastDescendantMap.get(parentSelectedId!) === node.id;
-      const hasVisibleChildren = !!(node.layer.children &&
-        node.layer.children.length > 0 &&
-        !collapsedIds.has(node.id));
+      const isSublayerNode = !!node.sublayer;
+      let hasVisibleChildren: boolean;
+
+      if (isSublayerNode) {
+        // Virtual sublayer nodes: visible children = expandable and not collapsed
+        hasVisibleChildren = node.canHaveChildren && !collapsedIds.has(node.id);
+      } else {
+        // Real layer nodes: check actual children and sublayer presence
+        const hasAnySublayers = (isRichTextLayer(node.layer) && getRichTextSublayers(node.layer).length > 0)
+          || (isTextContentLayer(node.layer) && getTextStyleSublayers(node.layer).length > 0);
+        hasVisibleChildren = (!collapsedIds.has(node.id)) && (
+          !!(node.layer.children && node.layer.children.length > 0) || hasAnySublayers
+        );
+      }
 
       result.set(node.id, {
-        isSelected: selectedIdsSet.has(node.id),
+        isSelected: effectiveSelectedSet.has(node.id),
         isChildOfSelected,
         isLastVisibleDescendant,
         hasVisibleChildren,
@@ -1484,7 +1871,7 @@ export default function LayersTree({
     });
 
     return result;
-  }, [flattenedNodes, selectedLayerIds, selectedLayerId, collapsedIds]);
+  }, [flattenedNodes, selectedLayerIds, selectedLayerId, collapsedIds, storeActiveSublayerIndex, storeActiveTextStyleKey]);
 
   return (
     <DndContext
@@ -1495,43 +1882,61 @@ export default function LayersTree({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="space-y-0">
-        {flattenedNodes.map((node) => {
+      <div ref={wrapperRef} style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const node = flattenedNodes[virtualRow.index];
           const selectionData = nodeSelectionData.get(node.id)!;
 
           return (
-            <LayerRow
+            <div
               key={node.id}
-              node={node}
-              isSelected={selectionData.isSelected}
-              isChildOfSelected={selectionData.isChildOfSelected}
-              isLastVisibleDescendant={selectionData.isLastVisibleDescendant}
-              hasVisibleChildren={selectionData.hasVisibleChildren}
-              canHaveChildren={node.canHaveChildren}
-              isOver={overId === node.id}
-              isDragging={activeId === node.id}
-              isDragActive={!!activeId}
-              dropPosition={overId === node.id ? dropPosition : null}
-              highlightedDepths={highlightedDepths}
-              onSelect={handleSelect}
-              onMultiSelect={handleMultiSelect}
-              onToggle={handleToggle}
-              pageId={pageId}
-              selectedLayerId={selectedLayerId}
-              liveLayerUpdates={liveLayerUpdates}
-              liveComponentUpdates={liveComponentUpdates}
-              scrollToSelected={shouldScrollToSelected}
-              activeBreakpoint={activeBreakpoint}
-            />
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: ROW_HEIGHT,
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              <LayerRow
+                node={node}
+                isSelected={selectionData.isSelected}
+                isChildOfSelected={selectionData.isChildOfSelected}
+                isLastVisibleDescendant={selectionData.isLastVisibleDescendant}
+                hasVisibleChildren={selectionData.hasVisibleChildren}
+                canHaveChildren={node.canHaveChildren}
+                isOver={overId === node.id}
+                isDragging={activeId === node.id}
+                isDragActive={!!activeId}
+                dropPosition={overId === node.id ? dropPosition : null}
+                highlightedDepths={highlightedDepths}
+                onSelect={handleSelect}
+                onMultiSelect={handleMultiSelect}
+                onToggle={handleToggle}
+                pageId={pageId}
+                selectedLayerId={selectedLayerId}
+                liveLayerUpdates={liveLayerUpdates}
+                liveComponentUpdates={liveComponentUpdates}
+                scrollToSelected={shouldScrollToSelected}
+                activeBreakpoint={activeBreakpoint}
+                isRenaming={renamingLayerId === node.id}
+                onRenameStart={handleRenameStart}
+                onRenameConfirm={handleRenameConfirm}
+                onToggleVisibility={handleToggleVisibility}
+              />
+            </div>
           );
         })}
 
         {/* Drop zone at the end for dropping layers at the bottom */}
-        <EndDropZone
-          isDragActive={!!activeId}
-          isOver={overId === 'end-drop-zone'}
-          editingComponentId={editingComponentId}
-        />
+        <div style={{ position: 'absolute', top: virtualizer.getTotalSize(), left: 0, width: '100%' }}>
+          <EndDropZone
+            isDragActive={!!activeId}
+            isOver={overId === 'end-drop-zone'}
+            editingComponentId={editingComponentId}
+          />
+        </div>
       </div>
 
       {/* Drag Overlay - custom ghost element with 40px offset */}
@@ -1581,11 +1986,14 @@ export default function LayersTree({
 
 // Helper function to rebuild tree structure after reordering
 function rebuildTree(
-  flattenedNodes: FlattenedItem[],
+  flattenedNodesRaw: FlattenedItem[],
   movedId: string,
   newParentId: string | null,
   newOrder: number
 ): Layer[] {
+  // Exclude virtual sublayer nodes — they don't represent real layers
+  const flattenedNodes = flattenedNodesRaw.filter(n => !n.sublayer);
+
   // Create a map of original layers to preserve all properties
   const originalLayerMap = new Map<string, Layer>();
 

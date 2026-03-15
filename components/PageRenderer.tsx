@@ -1,7 +1,11 @@
 import AnimationInitializer from '@/components/AnimationInitializer';
 import ContentHeightReporter from '@/components/ContentHeightReporter';
+import CustomCodeInjector from '@/components/CustomCodeInjector';
 import LayerRenderer from '@/components/LayerRenderer';
+import SliderInitializer from '@/components/SliderInitializer';
+import LightboxInitializer from '@/components/LightboxInitializer';
 import PasswordForm from '@/components/PasswordForm';
+import { renderHeadCode } from '@/lib/parse-head-html';
 import { resolveCustomCodePlaceholders } from '@/lib/resolve-cms-variables';
 import { generateInitialAnimationCSS, type HiddenLayerInfo } from '@/lib/animation-utils';
 import { buildCustomFontsCss, buildFontClassesCss, getGoogleFontLinks } from '@/lib/font-utils';
@@ -12,6 +16,24 @@ import { getItemWithValues } from '@/lib/repositories/collectionItemRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
 import { getClassesString } from '@/lib/layer-utils';
 import type { Layer, Component, Page, CollectionItemWithValues, CollectionField, Locale, PageFolder } from '@/types';
+
+/** Recursively check if any layer in the tree is a slider */
+function hasSliderLayers(layers: Layer[]): boolean {
+  for (const layer of layers) {
+    if (layer.name === 'slider') return true;
+    if (layer.children && hasSliderLayers(layer.children)) return true;
+  }
+  return false;
+}
+
+/** Recursively check if any layer in the tree is a lightbox */
+function hasLightboxLayers(layers: Layer[]): boolean {
+  for (const layer of layers) {
+    if (layer.name === 'lightbox') return true;
+    if (layer.children && hasLightboxLayers(layer.children)) return true;
+  }
+  return false;
+}
 
 /** Password protection context for 401 error pages */
 export type PasswordProtectionContext = {
@@ -26,17 +48,18 @@ interface PageRendererProps {
   layers: Layer[];
   components: Component[];
   generatedCss?: string;
+  colorVariablesCss?: string;
   collectionItem?: CollectionItemWithValues;
   collectionFields?: CollectionField[];
   locale?: Locale | null;
   availableLocales?: Locale[];
-  isPreview?: boolean; // Whether we're in preview mode (use draft data)
-  translations?: Record<string, any> | null; // Translations for localized URL generation
-  gaMeasurementId?: string | null; // Google Analytics Measurement ID (pre-fetched)
-  globalCustomCodeHead?: string | null; // Global custom code for <head> (pre-fetched)
-  globalCustomCodeBody?: string | null; // Global custom code for </body> (pre-fetched)
-  ycodeBadge?: boolean; // Whether to show the "Made in Ycode" badge
-  passwordProtection?: PasswordProtectionContext; // For 401 error pages - inject password form
+  isPreview?: boolean;
+  translations?: Record<string, any> | null;
+  gaMeasurementId?: string | null;
+  globalCustomCodeHead?: string | null;
+  globalCustomCodeBody?: string | null;
+  ycodeBadge?: boolean;
+  passwordProtection?: PasswordProtectionContext;
 }
 
 /**
@@ -65,6 +88,7 @@ export default async function PageRenderer({
   layers,
   components,
   generatedCss,
+  colorVariablesCss,
   collectionItem,
   collectionFields = [],
   locale,
@@ -241,7 +265,13 @@ export default async function PageRenderer({
 
   return (
     <>
-      {/* Inject CSS directly - Next.js hoists this to <head> during SSR */}
+      {/* Inject global custom head code — rendered via next/script + React 19 hoisting */}
+      {globalCustomCodeHead && renderHeadCode(globalCustomCodeHead, 'global-head')}
+
+      {/* Inject page-specific custom head code */}
+      {pageCustomCodeHead && renderHeadCode(pageCustomCodeHead, 'page-head')}
+
+      {/* Inject CSS directly — React 19 hoists <style> with precedence to <head> */}
       {generatedCss && (
         <style
           id="ycode-styles"
@@ -249,7 +279,15 @@ export default async function PageRenderer({
         />
       )}
 
-      {/* Load Google Fonts via <link> elements (more reliable than @import) */}
+      {/* Inject color variable CSS custom properties */}
+      {colorVariablesCss && (
+        <style
+          id="ycode-color-vars"
+          dangerouslySetInnerHTML={{ __html: colorVariablesCss }}
+        />
+      )}
+
+      {/* Load Google Fonts via <link> elements */}
       {googleFontLinkUrls.map((url, i) => (
         <link
           key={`gfont-${i}`}
@@ -295,17 +333,7 @@ export default async function PageRenderer({
         </>
       )}
 
-      {/* Inject global custom head code (applies to all pages) */}
-      {globalCustomCodeHead && (
-        <div dangerouslySetInnerHTML={{ __html: globalCustomCodeHead }} />
-      )}
-
-      {/* Inject page-specific custom head code */}
-      {pageCustomCodeHead && (
-        <div dangerouslySetInnerHTML={{ __html: pageCustomCodeHead }} />
-      )}
-
-      {/* Apply body layer classes to <body> synchronously before paint */}
+      {/* Apply body layer classes synchronously before paint */}
       <script
         dangerouslySetInnerHTML={{
           __html: (() => {
@@ -354,17 +382,23 @@ export default async function PageRenderer({
       {/* Initialize GSAP animations based on layer interactions */}
       <AnimationInitializer layers={resolvedLayers} />
 
+      {/* Initialize Swiper on slider elements */}
+      {hasSliderLayers(resolvedLayers) && <SliderInitializer />}
+
+      {/* Initialize lightbox modals */}
+      {hasLightboxLayers(resolvedLayers) && <LightboxInitializer />}
+
       {/* Report content height to parent for zoom calculations (preview only) */}
       {!page.is_published && <ContentHeightReporter />}
 
       {/* Inject global custom body code (applies to all pages) */}
       {globalCustomCodeBody && (
-        <div dangerouslySetInnerHTML={{ __html: globalCustomCodeBody }} />
+        <CustomCodeInjector html={globalCustomCodeBody} />
       )}
 
       {/* Inject page-specific custom body code */}
       {pageCustomCodeBody && (
-        <div dangerouslySetInnerHTML={{ __html: pageCustomCodeBody }} />
+        <CustomCodeInjector html={pageCustomCodeBody} />
       )}
 
       {/* Ycode badge (only on published pages, not in preview) */}

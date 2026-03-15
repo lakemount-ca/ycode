@@ -142,11 +142,19 @@ export function useDesignSync({
           activeUIState
         );
 
-        const updatedTextStyle = {
+        const updatedTextStyle: Record<string, unknown> = {
           ...currentTextStyle,
           design: updatedDesign,
           classes: updatedClasses.join(' '),
         };
+
+        // Track overrides when a layer style is applied to this text style
+        if (currentTextStyle.styleId) {
+          updatedTextStyle.styleOverrides = {
+            classes: updatedClasses.join(' '),
+            design: updatedDesign,
+          };
+        }
 
         const textStylesUpdate = {
           ...currentTextStyles,
@@ -236,6 +244,7 @@ export function useDesignSync({
   /**
    * Update multiple design properties at once
    * Applies breakpoint-aware class prefixes based on active viewport
+   * Supports text style mode (updates layer.textStyles[key] instead of layer)
    */
   const updateDesignProperties = useCallback(
     (updates: {
@@ -246,6 +255,61 @@ export function useDesignSync({
       const currentLayer = layerRef.current;
       if (!currentLayer) return;
 
+      // Text Style Mode: batch-update layer.textStyles[key]
+      if (isTextStyleMode && activeTextStyleKey) {
+        const currentTextStyles = currentLayer.textStyles ?? { ...DEFAULT_TEXT_STYLES };
+        const currentTextStyle = currentTextStyles[activeTextStyleKey] || {};
+        const currentDesign = currentTextStyle.design || {};
+        const updatedDesign = { ...currentDesign };
+
+        let currentClasses = (currentTextStyle.classes || '').split(' ').filter(Boolean);
+
+        updates.forEach(({ category, property, value }) => {
+          const categoryData = updatedDesign[category] || {};
+          updatedDesign[category] = {
+            ...categoryData,
+            [property]: value,
+            isActive: true,
+          };
+
+          if (!value) {
+            delete updatedDesign[category]![property as keyof typeof categoryData];
+          }
+
+          const newClass = value ? propertyToClass(category, property, value) : null;
+          currentClasses = setBreakpointClass(
+            currentClasses,
+            property,
+            newClass,
+            activeBreakpoint,
+            activeUIState
+          );
+        });
+
+        const updatedTextStyle: Record<string, unknown> = {
+          ...currentTextStyle,
+          design: updatedDesign,
+          classes: currentClasses.join(' '),
+        };
+
+        if (currentTextStyle.styleId) {
+          updatedTextStyle.styleOverrides = {
+            classes: currentClasses.join(' '),
+            design: updatedDesign,
+          };
+        }
+
+        const textStylesUpdate = {
+          ...currentTextStyles,
+          [activeTextStyleKey]: updatedTextStyle,
+        };
+
+        layerRef.current = { ...currentLayer, textStyles: textStylesUpdate };
+        onLayerUpdate(currentLayer.id, { textStyles: textStylesUpdate });
+        return;
+      }
+
+      // Normal Mode: update layer directly
       let currentClasses = Array.isArray(currentLayer.classes)
         ? [...currentLayer.classes]
         : (currentLayer.classes || '').split(' ').filter(Boolean);
@@ -253,9 +317,7 @@ export function useDesignSync({
       const currentDesign = currentLayer.design || {};
       const updatedDesign = { ...currentDesign };
 
-      // Process all updates
       updates.forEach(({ category, property, value }) => {
-        // Update design object
         const categoryData = updatedDesign[category] || {};
         updatedDesign[category] = {
           ...categoryData,
@@ -267,7 +329,6 @@ export function useDesignSync({
           delete updatedDesign[category]![property as keyof typeof categoryData];
         }
 
-        // Update classes with breakpoint and UI state awareness
         const newClass = value ? propertyToClass(category, property, value) : null;
         currentClasses = setBreakpointClass(
           currentClasses,
@@ -280,22 +341,18 @@ export function useDesignSync({
 
       const classesString = currentClasses.join(' ');
 
-      // Optimistically update the ref
       layerRef.current = {
         ...currentLayer,
         design: updatedDesign,
         classes: classesString,
       };
 
-      // Apply all updates at once
-      // Note: Use join instead of cn() because setBreakpointClass already handles
-      // property-aware conflict resolution
       onLayerUpdate(currentLayer.id, {
         design: updatedDesign,
         classes: classesString,
       });
     },
-    [onLayerUpdate, activeBreakpoint, activeUIState]
+    [onLayerUpdate, activeBreakpoint, activeUIState, isTextStyleMode, activeTextStyleKey]
   );
 
   /**
@@ -361,9 +418,10 @@ export function useDesignSync({
       }
 
       // Parse the inherited class to extract the actual value
-      const arbitraryMatch = inheritedClass.match(/\[([^\]]+)\]/);
+      // Also capture Tailwind opacity modifier (e.g., text-[#0073ff]/23 → #0073ff/23)
+      const arbitraryMatch = inheritedClass.match(/\[([^\]]+)\](?:\/(\d+))?/);
       if (arbitraryMatch) {
-        return arbitraryMatch[1];
+        return arbitraryMatch[2] ? `${arbitraryMatch[1]}/${arbitraryMatch[2]}` : arbitraryMatch[1];
       }
 
       // CSS variable reference for background-image
@@ -538,12 +596,22 @@ function mapClassToDesignValue(className: string, property: string): string | un
     return cleanClass;
   }
 
-  // Special handling for grid span properties: col-span-1 → 1, row-span-full → full
-  if (property === 'gridColumnSpan' && cleanClass.startsWith('col-span-')) {
-    return cleanClass.replace('col-span-', '');
-  }
-  if (property === 'gridRowSpan' && cleanClass.startsWith('row-span-')) {
-    return cleanClass.replace('row-span-', '');
+  // Multi-segment prefix properties need special handling.
+  // Naively splitting on '-' would turn "max-w-full" into "w-full" instead of "full".
+  const multiSegmentPrefixes: Record<string, string> = {
+    maxWidth: 'max-w-',
+    minWidth: 'min-w-',
+    maxHeight: 'max-h-',
+    minHeight: 'min-h-',
+    gridColumnSpan: 'col-span-',
+    gridRowSpan: 'row-span-',
+  };
+
+  const knownPrefix = multiSegmentPrefixes[property];
+  if (knownPrefix && cleanClass.startsWith(knownPrefix)) {
+    const value = cleanClass.slice(knownPrefix.length);
+    if (value === 'full') return '100%';
+    return value;
   }
 
   // Extract the value part after the property prefix
@@ -598,6 +666,11 @@ function mapClassToDesignValue(className: string, property: string): string | un
   // Check if we have a named mapping for this property
   if (namedMappings[property]?.[value]) {
     return namedMappings[property][value];
+  }
+
+  // Map 'full' → '100%' for width/height (w-full, h-full)
+  if ((property === 'width' || property === 'height') && value === 'full') {
+    return '100%';
   }
 
   return value;

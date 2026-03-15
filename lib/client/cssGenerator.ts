@@ -131,7 +131,10 @@ export async function generateCSS(layers: Layer[]): Promise<string> {
 <head>
   <meta charset="UTF-8">
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <style type="text/tailwindcss"></style>
+  <style type="text/tailwindcss">
+    @custom-variant current (&[aria-current]);
+    @custom-variant disabled (&:is(:disabled, [aria-disabled]));
+  </style>
 </head>
 <body>
   ${htmlContent}

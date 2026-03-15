@@ -5,7 +5,7 @@
  * generating Tailwind-compatible class names, and font URL construction.
  */
 
-import type { Font } from '@/types';
+import type { Font, FontAxis } from '@/types';
 
 /** Built-in system fonts available without loading */
 export const BUILT_IN_FONTS: Font[] = [
@@ -103,115 +103,152 @@ export function getFontFamilyValue(font: Font): string {
 }
 
 /**
- * Build a Google Fonts CSS2 API URL for a font
+ * Build a Google Fonts CSS2 API URL for a font.
+ * Uses variable font range syntax with all axes (e.g. ital,opsz,wght@0,14..32,100..900)
+ * when axis data is available. Falls back to weight-range detection, then individual weights.
  */
 export function buildGoogleFontUrl(font: Font): string {
-  const baseUrl = 'https://fonts.googleapis.com/css2?family=';
-  const parts: string[] = [baseUrl];
-
-  // Font name with + for spaces
-  parts.push(font.family.replace(/\s/g, '+'));
-
+  const family = font.family.replace(/\s/g, '+');
   const variants = font.variants || [];
+  const hasItalic = variants.some(v => v === 'italic' || v.endsWith('italic'));
 
-  if (variants.length > 0) {
-    parts.push(':');
-
-    const variantUrlParts = getFontVariantsUrlElements(variants);
-    parts.push(variantUrlParts.fontVariantsUrlPart);
-
-    const weights = font.weights || extractWeightsFromVariants(variants);
-    if (weights.length > 0) {
-      const weightUrlElements: string[] = [];
-      const hasItalic = variants.includes('italic');
-
-      for (const weight of weights) {
-        if (hasItalic) {
-          const repetition = weightUrlElements.filter(e => e.includes(weight)).length;
-          weightUrlElements.push(`${repetition},${weight};`);
-        } else {
-          weightUrlElements.push(`${weight};`);
-        }
-      }
-
-      weightUrlElements.sort();
-      parts.push('wght@');
-      // Remove trailing semicolon
-      parts.push(weightUrlElements.join('').slice(0, -1));
-    }
+  // Variable fonts: axes data includes wght range (and possibly opsz, wdth, etc.)
+  const wghtAxis = font.axes?.find(a => a.tag === 'wght');
+  if (wghtAxis) {
+    return buildVariableFontUrl(
+      family,
+      { min: wghtAxis.start, max: wghtAxis.end },
+      hasItalic,
+      font.axes,
+    );
   }
 
-  parts.push('&display=swap');
+  // Derive weights from stored weights or variants
+  const weights = font.weights?.length
+    ? font.weights
+    : extractWeightsFromVariants(variants);
 
-  return parts.join('');
+  if (weights.length === 0) {
+    return `https://fonts.googleapis.com/css2?family=${family}&display=swap`;
+  }
+
+  const sortedWeights = [...new Set(weights)].sort();
+
+  // Heuristic: contiguous weight range likely means variable font without axes data
+  const weightRange = getContiguousWeightRange(sortedWeights);
+  if (weightRange) {
+    return buildVariableFontUrl(family, weightRange, hasItalic, font.axes);
+  }
+
+  // Static font: list individual weights
+  if (hasItalic) {
+    const tuples: string[] = [];
+    for (const w of sortedWeights) tuples.push(`0,${w}`);
+    for (const w of sortedWeights) tuples.push(`1,${w}`);
+    return `https://fonts.googleapis.com/css2?family=${family}:ital,wght@${tuples.join(';')}&display=swap`;
+  }
+
+  return `https://fonts.googleapis.com/css2?family=${family}:wght@${sortedWeights.join(';')}&display=swap`;
 }
 
 /**
- * Parse font variants into URL elements for Google Fonts API
+ * Build a variable font URL with all axes in alphabetical order.
+ * Google Fonts CSS2 API requires axes listed alphabetically with matching
+ * value tuples: e.g. ital,opsz,wght@0,14..32,100..900;1,14..32,100..900
  */
-function getFontVariantsUrlElements(variants: string[]): {
-  fontVariantsUrlPart: string;
-  fontWeights: string[];
-} {
-  const fontVariantsUrlElements: string[] = [];
-  const fontWeights: string[] = [];
+function buildVariableFontUrl(
+  family: string,
+  weightRange: { min: number; max: number },
+  hasItalic: boolean,
+  axes?: FontAxis[] | null,
+): string {
+  const extraAxes = (axes || [])
+    .filter(a => a.tag !== 'wght' && a.tag !== 'ital')
+    .sort((a, b) => a.tag.localeCompare(b.tag));
 
-  const filteredVariants = variants.map(variant => {
-    if (variant === 'italic' || variant === 'regular' || !isNaN(Number(variant))) return variant;
-    return variant.replace('italic', '');
-  });
+  const axisTags: string[] = [];
+  const axisValues: string[] = [];
 
-  filteredVariants.forEach((variant, index) => {
-    const weight = getWeightFromVariantName(variant);
+  if (hasItalic) axisTags.push('ital');
 
-    if (!weight) {
-      fontVariantsUrlElements.push(variant);
-    } else {
-      fontWeights.push(weight);
-    }
+  for (const axis of extraAxes) {
+    axisTags.push(axis.tag);
+    axisValues.push(`${axis.start}..${axis.end}`);
+  }
 
-    if (index !== variants.length - 1 && !weight) {
-      fontVariantsUrlElements.push(',');
-    }
-  });
+  axisTags.push('wght');
+  axisValues.push(`${weightRange.min}..${weightRange.max}`);
 
-  const fontVariantsUrlPart = fontVariantsUrlElements
-    .map(e => e.replace('regular,', '').replace('italic', 'ital,'))
-    .join('');
+  const axisSpec = axisTags.join(',');
 
-  return {
-    fontVariantsUrlPart,
-    fontWeights: fontWeights.length > 0 ? fontWeights : ['400', '700'],
-  };
+  if (hasItalic) {
+    const normalTuple = ['0', ...axisValues].join(',');
+    const italicTuple = ['1', ...axisValues].join(',');
+    return `https://fonts.googleapis.com/css2?family=${family}:${axisSpec}@${normalTuple};${italicTuple}&display=swap`;
+  }
+
+  const tuple = axisValues.join(',');
+  return `https://fonts.googleapis.com/css2?family=${family}:${axisSpec}@${tuple}&display=swap`;
 }
 
-/**
- * Extract numeric weight from a variant name (e.g., "700italic" → "700")
- */
-function getWeightFromVariantName(variant: string): string | null {
-  if (variant === 'regular') variant = '400';
-
-  const validWeights = ['100', '200', '300', '400', '500', '600', '700', '800', '900'];
-  return validWeights.find(w => variant.includes(w)) || null;
-}
-
-/**
- * Extract numeric weights from font variant names
- */
+/** Extract numeric weights from variant names (e.g., "700italic" → "700", "regular" → "400") */
 function extractWeightsFromVariants(variants: string[]): string[] {
-  return variants
-    .map(v => {
-      if (v === 'italic' || v === 'regular') return '400';
-      if (!isNaN(Number(v))) return v;
-      return null;
-    })
-    .filter((v): v is string => v !== null);
+  const weights = new Set<string>();
+  for (const v of variants) {
+    if (v === 'regular' || v === 'italic') {
+      weights.add('400');
+    } else if (!isNaN(Number(v))) {
+      weights.add(v);
+    } else {
+      const match = v.match(/^(\d+)/);
+      if (match) weights.add(match[1]);
+    }
+  }
+  return Array.from(weights);
 }
 
 /**
- * Get available Tailwind weights for a font
+ * Check if sorted weights form a contiguous range in steps of 100
+ * (e.g. 100,200,...,900). Returns the range bounds or null for non-contiguous sets.
+ * Variable fonts on Google Fonts expose a full contiguous range, while static
+ * fonts typically list only a few discrete weights.
+ */
+function getContiguousWeightRange(
+  sortedWeights: string[]
+): { min: number; max: number } | null {
+  const nums = sortedWeights
+    .map(Number)
+    .filter(n => !isNaN(n) && n >= 100 && n <= 900);
+
+  if (nums.length < 3) return null;
+
+  const min = nums[0];
+  const max = nums[nums.length - 1];
+  const expectedCount = (max - min) / 100 + 1;
+
+  if (nums.length !== expectedCount) return null;
+
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] - nums[i - 1] !== 100) return null;
+  }
+
+  return { min, max };
+}
+
+/**
+ * Get available Tailwind weights for a font.
+ * Variable fonts derive weights from the wght axis range.
  */
 export function getFontAvailableWeights(font: Font): string[] {
+  const wghtAxis = font.axes?.find(a => a.tag === 'wght');
+  if (wghtAxis) {
+    const weights: string[] = [];
+    for (let w = Math.max(wghtAxis.start, 100); w <= Math.min(wghtAxis.end, 900); w += 100) {
+      weights.push(String(w));
+    }
+    return weights;
+  }
+
   if (font.weights && font.weights.length > 0) {
     return font.weights;
   }

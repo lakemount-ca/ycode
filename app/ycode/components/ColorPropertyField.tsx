@@ -31,6 +31,14 @@ interface ColorPropertyFieldProps {
   fieldGroups?: FieldGroup[];
   allFields?: Record<string, CollectionField[]>;
   collections?: Collection[];
+  /** Content for an optional "image" tab in the color picker */
+  imageTab?: React.ReactNode;
+  onImageActivate?: () => void;
+  onImageDeactivate?: (solidColor: string) => void;
+  /** Preview URL for an active background image */
+  imagePreviewUrl?: string;
+  /** Label for the active background image source (e.g. "File manager", "Custom URL") */
+  imageLabel?: string;
 }
 
 /** Build a FieldVariable from field selection params */
@@ -72,6 +80,11 @@ export default function ColorPropertyField({
   fieldGroups,
   allFields,
   collections,
+  imageTab,
+  onImageActivate,
+  onImageDeactivate,
+  imagePreviewUrl,
+  imageLabel,
 }: ColorPropertyFieldProps) {
   const colorFieldGroups = useMemo(() => {
     if (!fieldGroups) return [];
@@ -270,6 +283,11 @@ export default function ColorPropertyField({
       solidOnly={solidOnly}
       binding={binding}
       onClear={handleClearAll}
+      imageTab={imageTab}
+      onImageActivate={onImageActivate}
+      onImageDeactivate={onImageDeactivate}
+      imagePreviewUrl={imagePreviewUrl}
+      imageLabel={imageLabel}
     />
   );
 }

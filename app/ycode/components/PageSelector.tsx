@@ -53,7 +53,7 @@ interface PageSelectorProps {
 export default function PageSelector({
   value,
   onValueChange,
-  placeholder = 'Select page',
+  placeholder = 'Select...',
   disabled = false,
   includeErrorPages = false,
   className,
@@ -281,7 +281,7 @@ export default function PageSelector({
             )}
           </div>
           <div className="shrink-0">
-            <Icon name="chevronCombo" className="size-2.5! shrink-0 opacity-50" />
+            <Icon name="chevronDown" className="size-2.5! shrink-0 opacity-50" />
           </div>
         </Button>
       </PopoverTrigger>

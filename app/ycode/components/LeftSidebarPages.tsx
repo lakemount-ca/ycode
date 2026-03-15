@@ -138,20 +138,6 @@ export default function LeftSidebarPages({
 
     // If collection ID is provided, set up dynamic page with CMS settings
     if (collectionId) {
-      // Check if folder already contains a dynamic page
-      const existingDynamicPage = pages.find(
-        (p) =>
-          p.is_dynamic &&
-          p.page_folder_id === parentFolderId &&
-          p.is_published === false // Check same published state
-      );
-
-      if (existingDynamicPage) {
-        const folderName = parentFolderId ? 'this folder' : 'the root folder';
-        alert(`A dynamic page already exists in ${folderName}. Each folder can only contain one dynamic page.`);
-        return;
-      }
-
       // Use preloaded fields from store
       const collectionFields = fields[collectionId] || [];
 

@@ -15,12 +15,19 @@ import path from 'path';
 
 const OUTPUT_DIR = path.join(process.cwd(), 'storage', 'fonts');
 const OUTPUT_FILE = path.join(OUTPUT_DIR, 'google-fonts.json');
-const API_URL = 'https://www.googleapis.com/webfonts/v1/webfonts?sort=popularity';
+const API_URL = 'https://www.googleapis.com/webfonts/v1/webfonts?sort=popularity&capability=VF';
+
+interface GoogleFontAxis {
+  tag: string;
+  start: number;
+  end: number;
+}
 
 interface GoogleFontItem {
   family: string;
   variants: string[];
   category: string;
+  axes?: GoogleFontAxis[];
 }
 
 /** Load key=value pairs from .env into process.env */
@@ -64,11 +71,20 @@ async function fetchGoogleFonts() {
   }
 
   const data = await response.json();
-  const items: GoogleFontItem[] = (data.items || []).map((font: Record<string, unknown>) => ({
-    family: font.family,
-    variants: font.variants,
-    category: font.category,
-  }));
+  const items: GoogleFontItem[] = (data.items || []).map((font: Record<string, unknown>) => {
+    const item: GoogleFontItem = {
+      family: font.family as string,
+      variants: font.variants as string[],
+      category: font.category as string,
+    };
+
+    const axes = font.axes as GoogleFontAxis[] | undefined;
+    if (axes && axes.length > 0) {
+      item.axes = axes;
+    }
+
+    return item;
+  });
 
   // Ensure output directory exists
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });

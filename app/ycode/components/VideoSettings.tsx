@@ -16,7 +16,7 @@ import { FieldSelectDropdown, type FieldGroup, type FieldSourceType } from './Co
 import type { Layer, CollectionField, Collection, VideoVariable, FieldVariable, VideoSettingsValue } from '@/types';
 import { createAssetVariable, createDynamicTextVariable, getDynamicTextContent, isAssetVariable, getAssetId, isFieldVariable, isDynamicTextVariable } from '@/lib/variable-utils';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Select,
@@ -654,7 +654,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
               collections={collections || []}
               value={selectedField || currentFieldId}
               onSelect={handleFieldSelect}
-              placeholder="Select a field"
+              placeholder="Select..."
               allowedFieldTypes={VIDEO_FIELD_TYPES}
             />
           </div>
@@ -670,9 +670,9 @@ export default function VideoSettings(props: VideoSettingsProps) {
         {sourceContent}
 
         {/* Behavior */}
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <Switch
+            <Checkbox
               id="sa-video-controls" checked={hasControls}
               onCheckedChange={handleControlsChange}
             />
@@ -682,7 +682,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
             >Display controls</Label>
           </div>
           <div className="flex items-center gap-2">
-            <Switch
+            <Checkbox
               id="sa-video-muted" checked={isMuted}
               onCheckedChange={handleMutedChange}
             />
@@ -692,7 +692,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
             >Mute sound</Label>
           </div>
           <div className="flex items-center gap-2">
-            <Switch
+            <Checkbox
               id="sa-video-loop" checked={isLoop}
               onCheckedChange={handleLoopChange}
             />
@@ -703,7 +703,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
           </div>
           {videoType === 'youtube' && (
             <div className="flex items-center gap-2">
-              <Switch
+              <Checkbox
                 id="sa-youtube-privacy" checked={youtubePrivacyMode}
                 onCheckedChange={handleYoutubePrivacyModeChange}
               />
@@ -714,7 +714,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <Switch
+            <Checkbox
               id="sa-video-autoplay" checked={isAutoplay}
               onCheckedChange={handleAutoplayChange} disabled={!isMuted}
             />
@@ -780,9 +780,9 @@ export default function VideoSettings(props: VideoSettingsProps) {
                   <Label variant="muted">Behavior</Label>
                 </div>
 
-                <div className="col-span-2 flex flex-col gap-3">
+                <div className="col-span-2 flex flex-col gap-2">
                   <div className="flex items-center gap-2">
-                    <Switch
+                    <Checkbox
                       id="video-controls"
                       checked={hasControls}
                       onCheckedChange={handleControlsChange}
@@ -797,7 +797,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <Switch
+                    <Checkbox
                       id="video-muted"
                       checked={isMuted}
                       onCheckedChange={handleMutedChange}
@@ -812,7 +812,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <Switch
+                    <Checkbox
                       id="video-loop"
                       checked={isLoop}
                       onCheckedChange={handleLoopChange}
@@ -829,7 +829,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
                   {/* YouTube Privacy Mode */}
                   {videoType === 'youtube' && (
                     <div className="flex items-center gap-2">
-                      <Switch
+                      <Checkbox
                         id="youtube-privacy"
                         checked={youtubePrivacyMode}
                         onCheckedChange={handleYoutubePrivacyModeChange}
@@ -853,7 +853,7 @@ export default function VideoSettings(props: VideoSettingsProps) {
                   )}
 
                   <div className="flex items-center gap-2">
-                    <Switch
+                    <Checkbox
                       id="video-autoplay"
                       checked={isAutoplay}
                       onCheckedChange={handleAutoplayChange}

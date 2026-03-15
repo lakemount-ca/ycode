@@ -386,33 +386,6 @@ export async function createPage(pageData: CreatePageData, additionalData?: Reco
     page_folder_id: normalizedPageFolderId,
   };
 
-  // Check if trying to create a dynamic page in a folder that already has one
-  if (normalizedPageData.is_dynamic) {
-    let dynamicQuery = client
-      .from('pages')
-      .select('id, name')
-      .eq('is_dynamic', true)
-      .eq('is_published', normalizedPageData.is_published || false)
-      .is('deleted_at', null);
-
-    if (normalizedPageFolderId === null) {
-      dynamicQuery = dynamicQuery.is('page_folder_id', null);
-    } else {
-      dynamicQuery = dynamicQuery.eq('page_folder_id', normalizedPageFolderId);
-    }
-
-    const { data: existingDynamicPages, error: checkError } = await dynamicQuery;
-
-    if (checkError) {
-      throw new Error(`Failed to check for existing dynamic pages: ${checkError.message}`);
-    }
-
-    if (existingDynamicPages && existingDynamicPages.length > 0) {
-      const folderName = normalizedPageFolderId ? 'this folder' : 'the root folder';
-      throw new Error(`A dynamic page already exists in ${folderName}. Each folder can only contain one dynamic page.`);
-    }
-  }
-
   // Validate index page constraints (no current page data for new pages)
   await validateIndexPageConstraints(
     client,
@@ -498,39 +471,6 @@ export async function updatePage(id: string, updates: UpdatePageData): Promise<P
     error_page: normalizedUpdates.error_page !== undefined ? normalizedUpdates.error_page : currentPage.error_page,
     is_dynamic: normalizedUpdates.is_dynamic !== undefined ? normalizedUpdates.is_dynamic : currentPage.is_dynamic,
   };
-
-  // Check if trying to make a page dynamic or move a dynamic page to a folder that already has one
-  const targetFolderId = normalizedUpdates.page_folder_id !== undefined ? normalizedUpdates.page_folder_id : currentPage.page_folder_id;
-  const willBeDynamic = normalizedUpdates.is_dynamic !== undefined ? normalizedUpdates.is_dynamic : currentPage.is_dynamic;
-  const isBecomingDynamic = normalizedUpdates.is_dynamic === true && !currentPage.is_dynamic;
-  const isMovingDynamicPage = currentPage.is_dynamic && normalizedUpdates.page_folder_id !== undefined && normalizedUpdates.page_folder_id !== currentPage.page_folder_id;
-
-  if (willBeDynamic && (isBecomingDynamic || isMovingDynamicPage)) {
-    let existingDynamicPagesQuery = client
-      .from('pages')
-      .select('id, name')
-      .eq('is_dynamic', true)
-      .eq('is_published', currentPage.is_published)
-      .neq('id', id) // Exclude current page
-      .is('deleted_at', null);
-
-    if (targetFolderId === null) {
-      existingDynamicPagesQuery = existingDynamicPagesQuery.is('page_folder_id', null);
-    } else {
-      existingDynamicPagesQuery = existingDynamicPagesQuery.eq('page_folder_id', targetFolderId);
-    }
-
-    const { data: existingDynamicPages, error: checkError } = await existingDynamicPagesQuery;
-
-    if (checkError) {
-      throw new Error(`Failed to check for existing dynamic pages: ${checkError.message}`);
-    }
-
-    if (existingDynamicPages && existingDynamicPages.length > 0) {
-      const folderName = targetFolderId ? 'this folder' : 'the root folder';
-      throw new Error(`A dynamic page already exists in ${folderName}. Each folder can only contain one dynamic page.`);
-    }
-  }
 
   // Validate index page constraints if is_index or slug is being updated
   if (normalizedUpdates.is_index !== undefined || normalizedUpdates.slug !== undefined || normalizedUpdates.page_folder_id !== undefined) {

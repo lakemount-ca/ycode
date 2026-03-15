@@ -1,8 +1,14 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup, ButtonGroupSeparator } from '@/components/ui/button-group';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import Icon from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
@@ -23,7 +29,7 @@ interface SizingControlsProps {
   onLayerUpdate: (layerId: string, updates: Partial<Layer>) => void;
 }
 
-export default function SizingControls({ layer, onLayerUpdate }: SizingControlsProps) {
+const SizingControls = memo(function SizingControls({ layer, onLayerUpdate }: SizingControlsProps) {
   const { activeBreakpoint, activeUIState } = useEditorStore();
   const { updateDesignProperty, debouncedUpdateDesignProperty, getDesignProperty } = useDesignSync({
     layer,
@@ -272,6 +278,16 @@ export default function SizingControls({ layer, onLayerUpdate }: SizingControlsP
     }
   };
 
+  const handleAddAspectRatio = () => {
+    setAspectRatioInput('1/1');
+    updateDesignProperty('sizing', 'aspectRatio', '[1/1]');
+  };
+
+  const handleRemoveAspectRatio = () => {
+    setAspectRatioInput('');
+    updateDesignProperty('sizing', 'aspectRatio', null);
+  };
+
   // Handle object-fit change
   const handleObjectFitChange = (value: string) => {
     updateDesignProperty('sizing', 'objectFit', value || null);
@@ -295,7 +311,7 @@ export default function SizingControls({ layer, onLayerUpdate }: SizingControlsP
   // Check if parent layer has grid display
   const parentHasGrid = useMemo(() => {
     if (!layer) return false;
-    
+
     let layers: Layer[] = [];
     if (editingComponentId) {
       layers = componentDrafts[editingComponentId] || [];
@@ -303,9 +319,9 @@ export default function SizingControls({ layer, onLayerUpdate }: SizingControlsP
       const draft = draftsByPageId[currentPageId];
       layers = draft ? draft.layers : [];
     }
-    
+
     if (!layers.length) return false;
-    
+
     // Find parent layer
     const findParent = (tree: Layer[], targetId: string, parent: Layer | null = null): Layer | null => {
       for (const node of tree) {
@@ -317,10 +333,10 @@ export default function SizingControls({ layer, onLayerUpdate }: SizingControlsP
       }
       return null;
     };
-    
+
     const parent = findParent(layers, layer.id);
     if (!parent) return false;
-    
+
     // Check if parent has grid display
     const parentDisplay = parent.design?.layout?.display;
     return parentDisplay === 'Grid';
@@ -330,6 +346,23 @@ export default function SizingControls({ layer, onLayerUpdate }: SizingControlsP
     <SettingsPanel
       title="Sizing" isOpen={isOpen}
       onToggle={() => setIsOpen(!isOpen)}
+      action={
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="xs">
+              <Icon name="plus" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={handleAddAspectRatio}
+              disabled={!!aspectRatio}
+            >
+              Aspect ratio
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      }
     >
 
 {parentHasGrid && (
@@ -584,30 +617,6 @@ export default function SizingControls({ layer, onLayerUpdate }: SizingControlsP
         </div>
       </div>
 
-      <div className="grid grid-cols-3 items-start">
-        <Label variant="muted" className="h-8">Aspect ratio</Label>
-        <div className="col-span-2 flex flex-col gap-2">
-          <ButtonGroup>
-            <Input
-              value={aspectRatioInput}
-              onChange={(e) => handleAspectRatioChange(e.target.value)}
-            />
-            <ButtonGroupSeparator />
-            <Select value={getAspectRatioPresetValue()} onValueChange={handleAspectRatioPresetChange}>
-              <SelectTrigger />
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="aspect-square">Square</SelectItem>
-                  <SelectItem value="aspect-video">Video</SelectItem>
-                  <SelectItem value="aspect-4/3">4:3</SelectItem>
-                  <SelectItem value="aspect-3/4">3:4</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </ButtonGroup>
-        </div>
-      </div>
-
       {(['image', 'video'].includes(layer?.name || '')) && (
         <div className="grid grid-cols-3 items-start">
           <Label variant="muted" className="h-8">Object fit</Label>
@@ -629,6 +638,42 @@ export default function SizingControls({ layer, onLayerUpdate }: SizingControlsP
           </div>
         </div>
       )}
+
+      {aspectRatio && (
+        <div className="grid grid-cols-3 items-start">
+          <Label variant="muted" className="h-8">Aspect ratio</Label>
+          <div className="col-span-2 flex items-center gap-2">
+            <ButtonGroup className="flex-1">
+              <Input
+                value={aspectRatioInput}
+                onChange={(e) => handleAspectRatioChange(e.target.value)}
+              />
+              <ButtonGroupSeparator />
+              <Select value={getAspectRatioPresetValue()} onValueChange={handleAspectRatioPresetChange}>
+                <SelectTrigger />
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="aspect-square">Square</SelectItem>
+                    <SelectItem value="aspect-video">Video</SelectItem>
+                    <SelectItem value="aspect-4/3">4:3</SelectItem>
+                    <SelectItem value="aspect-3/4">3:4</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </ButtonGroup>
+            <span
+              role="button"
+              tabIndex={0}
+              className="p-0.5 rounded-sm opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
+              onClick={handleRemoveAspectRatio}
+            >
+              <Icon name="x" className="size-2.5" />
+            </span>
+          </div>
+        </div>
+      )}
+
     </SettingsPanel>
   );
-}
+});
+export default SizingControls;
