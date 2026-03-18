@@ -3220,7 +3220,8 @@ function layerToHtml(
 
     const imageAlt = layer.variables?.image?.alt;
     if (imageAlt && imageAlt.type === 'dynamic_text') {
-      attrs.push(`alt="${escapeHtml(imageAlt.data.content)}"`);
+      const resolvedAlt = resolveInlineVariablesFromData(imageAlt.data.content, effectiveCollectionItemData, pageCollectionItemData, 'UTC', effectiveLayerDataMap);
+      attrs.push(`alt="${escapeHtml(resolvedAlt)}"`);
     }
 
     // Set width/height from explicit attributes or intrinsic asset dimensions (prevents CLS)

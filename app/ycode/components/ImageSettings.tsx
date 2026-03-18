@@ -33,7 +33,7 @@ import { useEditorStore } from '@/stores/useEditorStore';
 import { useAssetsStore } from '@/stores/useAssetsStore';
 import { useComponentsStore } from '@/stores/useComponentsStore';
 import { DEFAULT_ASSETS, ASSET_CATEGORIES, isAssetOfType } from '@/lib/asset-utils';
-import { IMAGE_FIELD_TYPES, filterFieldGroupsByType, flattenFieldGroups } from '@/lib/collection-field-utils';
+import { IMAGE_FIELD_TYPES, SIMPLE_TEXT_FIELD_TYPES, filterFieldGroupsByType, flattenFieldGroups } from '@/lib/collection-field-utils';
 import { toast } from 'sonner';
 import { Separator } from '@/components/ui/separator';
 
@@ -533,6 +533,7 @@ export default function ImageSettings(props: ImageSettingsProps) {
             fieldGroups={fieldGroups}
             allFields={allFields}
             collections={collections}
+            allowedFieldTypes={SIMPLE_TEXT_FIELD_TYPES}
           />
         </div>
       </div>
