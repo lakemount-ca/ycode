@@ -54,44 +54,23 @@ export default function RichTextImagePopover({
 
   const handleOpenChange = useCallback((newOpen: boolean) => {
     if (newOpen && disabled) return;
-
-    if (newOpen) {
-      const { selection } = editor.state;
-      const node = editor.state.doc.nodeAt(selection.from);
-      if (node?.type.name === 'richTextImage') {
-        setAltText(node.attrs.alt || '');
-        setSavedPos(selection.from);
-      }
-    } else {
-      saveAlt();
-    }
-
+    if (!newOpen) saveAlt();
     onOpenChange(newOpen);
-  }, [editor, onOpenChange, disabled, saveAlt]);
+  }, [onOpenChange, disabled, saveAlt]);
 
-  // When the popover is open, listen for selection changes to switch between images
+  // Sync alt text from the currently selected image whenever the popover opens.
+  // This covers both the initial open AND re-opens after clicking a different image
+  // (where the popover closes on outside-click, selection changes, then reopens).
   useEffect(() => {
     if (!open) return;
 
-    const handleSelectionUpdate = () => {
-      const { selection } = editor.state;
-      const node = editor.state.doc.nodeAt(selection.from);
-      if (node?.type.name !== 'richTextImage') return;
-      if (selection.from === savedPosRef.current) return;
-
-      // Save the current image's alt before switching
-      if (savedPosRef.current !== null) {
-        saveAltAtPos(savedPosRef.current, altTextRef.current);
-      }
-
-      // Load the newly selected image
+    const { selection } = editor.state;
+    const node = editor.state.doc.nodeAt(selection.from);
+    if (node?.type.name === 'richTextImage') {
       setAltText(node.attrs.alt || '');
       setSavedPos(selection.from);
-    };
-
-    editor.on('selectionUpdate', handleSelectionUpdate);
-    return () => { editor.off('selectionUpdate', handleSelectionUpdate); };
-  }, [open, editor, saveAltAtPos]);
+    }
+  }, [open, editor]);
 
   useEffect(() => {
     if (open) {
