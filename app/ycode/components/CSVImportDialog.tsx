@@ -277,7 +277,7 @@ export function CSVImportDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
         showCloseButton={!importing}
-        className="sm:max-w-lg"
+        className="sm:max-w-lg max-h-[85vh]"
         onInteractOutside={(e) => { if (importing) e.preventDefault(); }}
         onEscapeKeyDown={(e) => { if (importing) e.preventDefault(); }}
       >
@@ -336,7 +336,7 @@ export function CSVImportDialog({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="overflow-y-auto -my-4">
+            <div className="overflow-y-auto -my-4 min-h-0 no-scrollbar">
               <div className="divide-y">
                 {headers.map(header => {
                   const mappedFieldIds = getMappedFieldIds(header);
