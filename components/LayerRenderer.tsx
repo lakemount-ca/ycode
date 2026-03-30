@@ -1531,26 +1531,32 @@ const LayerItem: React.FC<{
 
     // Convert string boolean values to actual booleans and map HTML attrs to JSX
     const normalizedAttributes = Object.fromEntries(
-      Object.entries(otherAttributes).map(([key, value]) => {
-        // Map HTML attribute names to JSX equivalents
-        const jsxKey = htmlToJsxAttrMap[key] || key;
+      Object.entries(otherAttributes)
+        .filter(([key]) => {
+          // React uses defaultValue/value on <select>, not selected on <option>
+          if (htmlTag === 'option' && key === 'selected') return false;
+          return true;
+        })
+        .map(([key, value]) => {
+          // Map HTML attribute names to JSX equivalents
+          const jsxKey = htmlToJsxAttrMap[key] || key;
 
-        // If value is already a boolean, keep it
-        if (typeof value === 'boolean') {
+          // If value is already a boolean, keep it
+          if (typeof value === 'boolean') {
+            return [jsxKey, value];
+          }
+          // If value is a string that looks like a boolean, convert it
+          if (typeof value === 'string') {
+            if (value === 'true') {
+              return [jsxKey, true];
+            }
+            if (value === 'false') {
+              return [jsxKey, false];
+            }
+          }
+          // For all other values, keep them as-is
           return [jsxKey, value];
-        }
-        // If value is a string that looks like a boolean, convert it
-        if (typeof value === 'string') {
-          if (value === 'true') {
-            return [jsxKey, true];
-          }
-          if (value === 'false') {
-            return [jsxKey, false];
-          }
-        }
-        // For all other values, keep them as-is
-        return [jsxKey, value];
-      })
+        })
     );
 
     // Parse style string to object if needed (for display: contents from collection wrappers)
@@ -1759,6 +1765,16 @@ const LayerItem: React.FC<{
       Object.entries(layer.settings.customAttributes).forEach(([name, value]) => {
         elementProps[name] = value;
       });
+    }
+
+    // Select with placeholder: set defaultValue so React shows the placeholder option
+    if (htmlTag === 'select' && !elementProps.value) {
+      const hasPlaceholder = effectiveLayer.children?.some(
+        (c) => c.name === 'option' && c.settings?.isPlaceholder
+      );
+      if (hasPlaceholder) {
+        elementProps.defaultValue = '';
+      }
     }
 
     // Add editor event handlers if in edit mode (but not for context menu trigger)

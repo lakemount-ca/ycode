@@ -95,13 +95,35 @@ const SORT_ORDER_PRESET_OPTIONS: Array<{ label: string; value: string }> = [
 const EMPTY_FIELDS: never[] = [];
 
 /**
- * Extract option data from select layer children
+ * Check if an option child is the placeholder option
+ */
+function isPlaceholderOption(child: Layer): boolean {
+  return !!child.settings?.isPlaceholder;
+}
+
+/**
+ * Extract the placeholder text from a select layer's placeholder option child
+ */
+function getPlaceholderText(layer: Layer): string {
+  const placeholder = layer.children?.find(
+    (child) => child.name === 'option' && isPlaceholderOption(child)
+  );
+  if (!placeholder) return '';
+  const textVar = placeholder.variables?.text;
+  if (textVar?.type === 'dynamic_text' && textVar.data?.content) {
+    return String(textVar.data.content);
+  }
+  return '';
+}
+
+/**
+ * Extract option data from select layer children (excludes placeholder)
  */
 function getOptionsFromLayer(layer: Layer): OptionData[] {
   if (!layer.children || layer.children.length === 0) return [];
 
   return layer.children
-    .filter((child) => child.name === 'option')
+    .filter((child) => child.name === 'option' && !isPlaceholderOption(child))
     .map((child) => {
       const textVar = child.variables?.text;
       let label = '';
@@ -141,6 +163,25 @@ function buildOptionLayer(id: string, label: string, value: string): Layer {
         data: {
           content: label,
         },
+      },
+    },
+  };
+}
+
+/**
+ * Build a placeholder option layer (disabled, selected, hidden, value="")
+ */
+function buildPlaceholderOption(id: string, text: string): Layer {
+  return {
+    id,
+    name: 'option',
+    classes: '',
+    attributes: { value: '', disabled: 'true', hidden: 'true' },
+    settings: { isPlaceholder: true },
+    variables: {
+      text: {
+        type: 'dynamic_text',
+        data: { content: text },
       },
     },
   };
@@ -371,6 +412,8 @@ export default function SelectOptionsSettings({
   const isSortOrderMode = sourceValue === SOURCE_SORT_ORDER;
   const isSortByMode = sourceValue === SOURCE_SORT_BY;
 
+  const placeholderText = isSelectLayer && layer ? getPlaceholderText(layer) : '';
+
   const sortByCollectionId = layer?.settings?.sortByCollectionId;
   const rawSortByFieldIds = layer?.settings?.sortByFieldIds;
   const sortByFieldIds = useMemo(() => rawSortByFieldIds || [], [rawSortByFieldIds]);
@@ -451,6 +494,22 @@ export default function SelectOptionsSettings({
       });
     }
   }, [layer, isCheckboxWrapper, isRadioWrapper, onLayerUpdate]);
+
+  const handlePlaceholderChange = useCallback((text: string) => {
+    if (!layer) return;
+    const currentChildren = layer.children || [];
+    const withoutPlaceholder = currentChildren.filter((c) => !isPlaceholderOption(c));
+
+    if (text.trim()) {
+      const existing = currentChildren.find((c) => isPlaceholderOption(c));
+      const placeholderId = existing?.id || generateId('lyr');
+      onLayerUpdate(layer.id, {
+        children: [buildPlaceholderOption(placeholderId, text), ...withoutPlaceholder],
+      });
+    } else {
+      onLayerUpdate(layer.id, { children: withoutPlaceholder });
+    }
+  }, [layer, onLayerUpdate]);
 
   const handleSortByCollectionChange = useCallback((collectionId: string) => {
     if (!layer) return;
@@ -915,6 +974,20 @@ export default function SelectOptionsSettings({
             </Select>
           </div>
         </div>
+
+        {/* Placeholder (select only) */}
+        {isSelectLayer && (
+          <div className="grid grid-cols-3 items-center">
+            <Label variant="muted">Placeholder</Label>
+            <div className="col-span-2 *:w-full">
+              <Input
+                value={placeholderText}
+                onChange={(e) => handlePlaceholderChange(e.target.value)}
+                placeholder="Select an option..."
+              />
+            </div>
+          </div>
+        )}
 
         {/* Collection source settings */}
         {isCollectionSource && (

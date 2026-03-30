@@ -3704,6 +3704,10 @@ function layerToHtml(
     }
   }
 
+  if (layer.name === 'option' && layer.settings?.isPlaceholder) {
+    attrs.push('selected');
+  }
+
   // For buttons rendered as <a>, resolve link href and add attributes directly
   if (isButtonWithLink && buttonLinkSettings) {
     let btnLinkHref = '';
