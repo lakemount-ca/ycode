@@ -1714,10 +1714,17 @@ export async function resolveCollectionLayers(
             offset = collectionVariable.offset;
           }
 
+          // When field-based sorting is active, fetch ALL items so we sort the
+          // full set before applying limit/offset. DB-level pagination uses
+          // manual_order which would give us the wrong subset.
+          const isFieldSort = sortBy && sortBy !== 'none' && sortBy !== 'manual' && sortBy !== 'random';
+
           // Build filters for the query
           const filters: any = {};
-          if (limit) filters.limit = limit;
-          if (offset) filters.offset = offset;
+          if (!isFieldSort) {
+            if (limit) filters.limit = limit;
+            if (offset) filters.offset = offset;
+          }
 
           // For reference/multi-reference fields, get allowed item IDs BEFORE fetching
           // This ensures pagination counts and offsets are correct for the filtered set
@@ -1809,6 +1816,13 @@ export async function resolveCollectionLayers(
                 const comparison = aStr.localeCompare(bStr);
                 return sortOrder === 'desc' ? -comparison : comparison;
               });
+
+              // For field-based sorts we fetched all items to sort correctly,
+              // now apply limit/offset to get the right page
+              if (limit || offset) {
+                const start = offset || 0;
+                sortedItems = sortedItems.slice(start, limit ? start + limit : undefined);
+              }
             }
           }
 
