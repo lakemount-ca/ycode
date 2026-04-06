@@ -6,6 +6,7 @@ import {
 } from '@/lib/apps/airtable/sync-service';
 import { createWebhook } from '@/lib/apps/airtable';
 import { noCache } from '@/lib/api-response';
+import { getSiteBaseUrl } from '@/lib/url-utils';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -24,18 +25,15 @@ export async function POST(request: NextRequest) {
 
     const token = await requireAirtableToken();
 
-    // Build the public webhook URL from env or request origin
-    const baseUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '') ||
-      request.nextUrl.origin;
-
+    const baseUrl = getSiteBaseUrl() || request.nextUrl.origin;
     const notificationUrl = `${baseUrl}/api/airtable-webhook`;
 
     if (!notificationUrl.startsWith('https://')) {
       return noCache(
-        { error: 'HTTPS URL required', detail: 'Set NEXT_PUBLIC_SITE_URL to a public HTTPS URL.' },
+        {
+          error: 'HTTPS URL required',
+          detail: 'Webhooks require a public HTTPS URL. On Vercel, enable "Automatically expose System Environment Variables" in project settings. Otherwise, set NEXT_PUBLIC_SITE_URL.',
+        },
         400
       );
     }
@@ -49,7 +47,10 @@ export async function POST(request: NextRequest) {
       });
       if (ping.status === 401 || ping.status === 403) {
         return noCache(
-          { error: 'Webhook URL is not publicly accessible', detail: 'Set NEXT_PUBLIC_SITE_URL to a public HTTPS URL.' },
+          {
+            error: 'Webhook URL is not publicly accessible',
+            detail: 'Webhooks require a public HTTPS URL. On Vercel, enable "Automatically expose System Environment Variables" in project settings. Otherwise, set NEXT_PUBLIC_SITE_URL.',
+          },
           400
         );
       }
