@@ -291,6 +291,10 @@ async function incrementalSync(
  * Process an Airtable webhook notification.
  * Extracts per-record changes and runs incremental sync when practical,
  * falling back to full sync for large changesets.
+ *
+ * Concurrency guard: claims `syncStatus: 'syncing'` before fetching
+ * payloads and advances the cursor before processing, so concurrent
+ * serverless invocations skip or see an empty payload.
  */
 export async function processWebhookNotification(
   baseId: string,
@@ -305,38 +309,43 @@ export async function processWebhookNotification(
 
   if (affectedConnections.length === 0) return [];
 
-  const cursor = affectedConnections[0].webhookCursor || undefined;
-  const payloadResponse = await getWebhookPayloads(token, baseId, webhookId, cursor);
-
-  if (!payloadResponse.payloads?.length) {
-    if (payloadResponse.cursor) {
-      for (const conn of affectedConnections) {
-        await updateConnection(conn.id, { webhookCursor: payloadResponse.cursor });
-      }
-    }
-    return [];
-  }
-
   const results: SyncResult[] = [];
   for (const conn of affectedConnections) {
     const freshConn = await getConnectionById(conn.id);
-    if (freshConn?.syncStatus === 'syncing') {
-      continue;
+    if (!freshConn || freshConn.syncStatus === 'syncing') continue;
+
+    await updateConnection(conn.id, { syncStatus: 'syncing', syncError: null });
+
+    try {
+      const cursor = freshConn.webhookCursor || undefined;
+      const payloadResponse = await getWebhookPayloads(token, baseId, webhookId, cursor);
+
+      if (payloadResponse.cursor) {
+        await updateConnection(conn.id, { webhookCursor: payloadResponse.cursor });
+      }
+
+      if (!payloadResponse.payloads?.length) {
+        await updateConnection(conn.id, { syncStatus: 'idle' });
+        continue;
+      }
+
+      const changes = extractTableChanges(payloadResponse.payloads, conn.tableId);
+      const totalChanges = changes.createdRecordIds.length
+        + changes.changedRecordIds.length
+        + changes.destroyedRecordIds.length;
+
+      if (totalChanges > 0) {
+        const result = totalChanges > INCREMENTAL_SYNC_THRESHOLD
+          ? await fullSync(freshConn)
+          : await incrementalSync(freshConn, changes);
+        results.push(result);
+      } else {
+        await updateConnection(conn.id, { syncStatus: 'idle' });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown sync error';
+      await updateConnection(conn.id, { syncStatus: 'error', syncError: message });
     }
-
-    const changes = extractTableChanges(payloadResponse.payloads, conn.tableId);
-    const totalChanges = changes.createdRecordIds.length
-      + changes.changedRecordIds.length
-      + changes.destroyedRecordIds.length;
-
-    if (totalChanges > 0) {
-      const result = totalChanges > INCREMENTAL_SYNC_THRESHOLD
-        ? await fullSync(conn)
-        : await incrementalSync(conn, changes);
-      results.push(result);
-    }
-
-    await updateConnection(conn.id, { webhookCursor: payloadResponse.cursor });
   }
 
   return results;
