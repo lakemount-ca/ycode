@@ -9,6 +9,7 @@ import { isFieldVariable, isAssetVariable, createDynamicTextVariable, createDyna
 import { generateImageSrcset, getImageSizes, getOptimizedImageUrl, getAssetProxyUrl, DEFAULT_ASSETS, collectLayerAssetIds } from '@/lib/asset-utils';
 import { resolveComponents, applyComponentOverrides } from '@/lib/resolve-components';
 import { isTiptapDoc, hasBlockElementsWithResolver } from '@/lib/tiptap-utils';
+import { castValue } from '@/lib/collection-utils';
 import { DEFAULT_TEXT_STYLES } from '@/lib/text-format-utils';
 
 // Pagination context passed through to resolveCollectionLayers
@@ -894,10 +895,12 @@ function applyCmsTranslations(
 
   const translatedValues = { ...itemValues };
 
-  // Create a map of field ID to field key for lookup
+  // Create maps for field key and field type lookup
   const fieldIdToKey = new Map<string, string | null>();
+  const fieldIdToType = new Map<string, string>();
   for (const field of collectionFields) {
     fieldIdToKey.set(field.id, field.key);
+    fieldIdToType.set(field.id, field.type);
   }
 
   // Apply translations for each field
@@ -911,7 +914,12 @@ function applyCmsTranslations(
 
     const translatedValue = getTranslationValue(translation);
     if (translatedValue) {
-      translatedValues[fieldId] = translatedValue;
+      // Cast the translated string using the field type so rich_text values
+      // are parsed back into Tiptap document objects (matching castValue behavior)
+      const fieldType = fieldIdToType.get(fieldId);
+      translatedValues[fieldId] = fieldType
+        ? castValue(translatedValue, fieldType as any)
+        : translatedValue;
     }
   }
 
