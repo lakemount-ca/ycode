@@ -716,6 +716,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
   const components = useComponentsStore((state) => state.components);
   const componentDrafts = useComponentsStore((state) => state.componentDrafts);
   const [collectionItems, setCollectionItems] = useState<Array<{ id: string; label: string }>>([]);
+  const [collectionItemSearch, setCollectionItemSearch] = useState('');
 
   // Get editing component's variables for default value display
   // Depends on `components` array to react to variable changes
@@ -1946,7 +1947,13 @@ const CenterCanvas = React.memo(function CenterCanvas({
             {currentPage?.is_dynamic && collectionId && (
               <Select
                 value={currentPageCollectionItemId || ''}
-                onValueChange={setCurrentPageCollectionItemId}
+                onValueChange={(value) => {
+                  setCurrentPageCollectionItemId(value);
+                  setCollectionItemSearch('');
+                }}
+                onOpenChange={(open) => {
+                  if (!open) setCollectionItemSearch('');
+                }}
                 disabled={isLoadingItems || collectionItems.length === 0}
               >
                 <SelectTrigger className="w-24 justify-between" size="sm">
@@ -1969,18 +1976,31 @@ const CenterCanvas = React.memo(function CenterCanvas({
                   )}
                 </SelectTrigger>
 
-                <SelectContent>
-                  {collectionItems.length > 0 ? (
-                    collectionItems.map((item) => (
+                <SelectContent
+                  searchable
+                  searchValue={collectionItemSearch}
+                  onSearchChange={setCollectionItemSearch}
+                  searchPlaceholder="Search items..."
+                  align="start"
+                  className="w-72"
+                >
+                  {(() => {
+                    const filtered = collectionItems.filter(item =>
+                      item.label.toLowerCase().includes(collectionItemSearch.toLowerCase())
+                    );
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                          {collectionItemSearch ? 'No items found' : 'No items available'}
+                        </div>
+                      );
+                    }
+                    return filtered.map((item) => (
                       <SelectItem key={item.id} value={item.id}>
                         {item.label}
                       </SelectItem>
-                    ))
-                  ) : (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                      No items available
-                    </div>
-                  )}
+                    ));
+                  })()}
                 </SelectContent>
               </Select>
             )}
