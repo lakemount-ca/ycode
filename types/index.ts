@@ -307,9 +307,9 @@ export interface InteractionTween {
 
 export type ApplyStyles = 'on-load' | 'on-trigger';
 
-export type TweenPropertyKey = 'x' | 'y' | 'rotation' | 'scale' | 'skewX' | 'skewY' | 'autoAlpha' | 'display';
+export type TweenPropertyKey = 'x' | 'y' | 'rotation' | 'scale' | 'skewX' | 'skewY' | 'autoAlpha' | 'display' | 'height';
 
-export type InteractionApplyStyles = Record<TweenPropertyKey, ApplyStyles>;
+export type InteractionApplyStyles = Partial<Record<TweenPropertyKey, ApplyStyles>>;
 
 export type TweenProperties = {
   [K in TweenPropertyKey]?: string | null;
