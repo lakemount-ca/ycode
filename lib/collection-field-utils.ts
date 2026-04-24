@@ -475,12 +475,15 @@ export function buildFieldGroups(config: BuildFieldGroupsConfig): FieldGroup[] |
   const groups: FieldGroup[] = [];
   const addedCollectionIds = new Set<string>();
 
-  // Add multi-asset virtual fields if inside a multi-asset collection context
+  // Add multi-asset virtual fields if inside a multi-asset collection context.
+  // Virtual asset field values live in the per-iteration item data only
+  // (never in pageCollectionItemData), so always use 'collection' source —
+  // even when the parent multi-image field itself is page-bound.
   if (multiAssetContext) {
     groups.push({
       fields: buildMultiAssetVirtualFields(),
       label: 'File fields',
-      source: multiAssetContext.source,
+      source: 'collection',
     });
   }
 

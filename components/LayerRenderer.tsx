@@ -1222,7 +1222,8 @@ const LayerItem: React.FC<{
         return ids.includes(parentId);
       });
     } else if (!sourceFieldId) {
-      items = allCollectionItems;
+      // Multi-asset without a selected field has no items to render
+      items = sourceFieldType === 'multi_asset' ? [] : allCollectionItems;
     } else {
       // Get the reference field value using source-aware resolution
       const refValue = resolveFieldFromSources(sourceFieldId, undefined, collectionLayerData, pageCollectionItemData);
@@ -2792,9 +2793,15 @@ const LayerItem: React.FC<{
             };
 
             // Resolve per-item background image from CMS field variable → CSS variable (combined with gradient)
+            // For multi-asset collections, virtual asset fields (__asset_url etc.) live in
+            // enhancedItemValues only. If the binding was authored with source='page' (legacy),
+            // expose those values via pageCollectionItemData so resolution still succeeds.
             let itemElementProps = elementProps;
             if (bgImageVariable && isFieldVariable(bgImageVariable) && bgImageVariable.data.field_id) {
-              const resolvedBgAssetId = resolveFieldValue(bgImageVariable, mergedItemData, pageCollectionItemData, updatedLayerDataMap);
+              const bgPageData = sourceFieldType === 'multi_asset'
+                ? { ...pageCollectionItemData, ...enhancedItemValues }
+                : pageCollectionItemData;
+              const resolvedBgAssetId = resolveFieldValue(bgImageVariable, mergedItemData, bgPageData, updatedLayerDataMap);
               if (resolvedBgAssetId) {
                 const bgAsset = assetsById[resolvedBgAssetId] || getAsset(resolvedBgAssetId);
                 const bgUrl = bgAsset?.public_url || resolvedBgAssetId;

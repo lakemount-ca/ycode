@@ -24,20 +24,36 @@ import {
 import SettingsPanel from './SettingsPanel';
 import ToggleGroup from './ToggleGroup';
 
-import { findAncestorByName } from '@/lib/layer-utils';
+import { findAncestorByName, getCollectionVariable } from '@/lib/layer-utils';
 import { isSliderLayerName, DEFAULT_SLIDER_SETTINGS, createSlideLayer } from '@/lib/templates/utilities';
 import { EFFECTS_WITH_PER_VIEW } from '@/lib/slider-utils';
 import { slidePrev, slideNext } from '@/hooks/use-canvas-slider';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { usePagesStore } from '@/stores/usePagesStore';
-
-import type { Layer, SliderSettings as SliderSettingsType, SwiperAnimationEffect, SliderLoopMode, SliderPaginationType } from '@/types';
+import { useCollectionLayerStore } from '@/stores/useCollectionLayerStore';
+import {
+  MULTI_ASSET_COLLECTION_ID,
+  MULTI_ASSET_VIRTUAL_FIELDS,
+  isMultipleAssetField,
+  isVirtualAssetField,
+} from '@/lib/collection-field-utils';
+import { isFieldVariable } from '@/lib/variable-utils';
+import type { FieldGroup } from '@/lib/collection-field-utils';
+import type { FieldVariable, Layer, SliderSettings as SliderSettingsType, SwiperAnimationEffect, SliderLoopMode, SliderPaginationType } from '@/types';
 
 interface SliderSettingsProps {
   layer: Layer | null;
   onLayerUpdate: (layerId: string, updates: Partial<Layer>) => void;
   allLayers: Layer[];
+  /**
+   * Field groups (incl. ancestor + page collection fields) used to detect whether
+   * any multi-image fields are available — needed to enable/disable the CMS source.
+   */
+  fieldGroups?: FieldGroup[];
 }
+
+/** Slider content source: static slides or a CMS multi-image field */
+type SliderSource = 'static' | 'cms';
 
 const ANIMATION_EFFECTS: { label: string; value: SwiperAnimationEffect }[] = [
   { label: 'Slide', value: 'slide' },
@@ -55,8 +71,9 @@ const EASING_OPTIONS: { label: string; value: string; icon: 'ease-linear' | 'eas
   { label: 'Ease out', value: 'ease-out', icon: 'ease-out' },
 ];
 
-export default function SliderSettings({ layer, onLayerUpdate, allLayers }: SliderSettingsProps) {
+export default function SliderSettings({ layer, onLayerUpdate, allLayers, fieldGroups }: SliderSettingsProps) {
   const [isOpen, setIsOpen] = useState(true);
+  const [isContentOpen, setIsContentOpen] = useState(true);
 
   // Find the root slider layer: either the current layer or an ancestor
   const sliderLayer = useMemo((): Layer | null => {
@@ -73,12 +90,28 @@ export default function SliderSettings({ layer, onLayerUpdate, allLayers }: Slid
   const handleNext = useCallback(() => slideNext(sliderLayerId), [sliderLayerId]);
 
   const currentPageId = useEditorStore((state) => state.currentPageId);
+  const setSliderSnapCount = useEditorStore((state) => state.setSliderSnapCount);
   const addLayerWithId = usePagesStore((state) => state.addLayerWithId);
   const setSelectedLayerId = useEditorStore((state) => state.setSelectedLayerId);
+  const clearLayerData = useCollectionLayerStore((state) => state.clearLayerData);
+
+  // Inner slides wrapper and the first slide inside it (the loop template when CMS-bound)
+  const slidesLayer = useMemo(() => sliderLayer?.children?.find(c => c.name === 'slides') ?? null, [sliderLayer]);
+  const templateSlide = useMemo(() => slidesLayer?.children?.find(c => c.name === 'slide') ?? null, [slidesLayer]);
+  const templateSlideCollection = templateSlide ? getCollectionVariable(templateSlide) : null;
+  const isCmsSource = !!templateSlideCollection?.id;
+
+  // The CMS source option is only enabled if at least one multi-image field
+  // is reachable from this slider's context (page or ancestor collections).
+  const hasMultiImageFields = useMemo<boolean>(() => {
+    if (!fieldGroups) return false;
+    return fieldGroups.some(group =>
+      group.fields.some(f => f.type === 'image' && isMultipleAssetField(f))
+    );
+  }, [fieldGroups]);
 
   const handleAddSlide = useCallback(() => {
     if (!currentPageId || !sliderLayer) return;
-    const slidesLayer = sliderLayer.children?.find(c => c.name === 'slides');
     if (!slidesLayer) return;
     const slideNumber = (slidesLayer.children?.length ?? 0) + 1;
     const slide = createSlideLayer(`Slide ${slideNumber}`, '/ycode/layouts/assets/placeholder-2.webp');
@@ -86,11 +119,99 @@ export default function SliderSettings({ layer, onLayerUpdate, allLayers }: Slid
       addLayerWithId(currentPageId, slidesLayer.id, slide);
       requestAnimationFrame(() => setSelectedLayerId(slide.id));
     }
-  }, [currentPageId, sliderLayer, addLayerWithId, setSelectedLayerId]);
+  }, [currentPageId, sliderLayer, slidesLayer, addLayerWithId, setSelectedLayerId]);
+
+  /**
+   * Switch slides content source between static and CMS multi-image.
+   *
+   * On 'cms': mark the template slide as a (still-unbound) multi-asset collection
+   * and pre-bind its background to the virtual `__asset_url` field. The actual
+   * multi-image field is then chosen by selecting the slide and using the standard
+   * CMS section in the right sidebar — once bound, the background renders without
+   * any extra step.
+   *
+   * On 'static': clear the multi-asset collection binding and any orphaned
+   * virtual-asset background (it would have no context outside CMS mode).
+   */
+  const handleSourceChange = useCallback((source: SliderSource) => {
+    if (!slidesLayer || !templateSlide) return;
+    if (source === 'cms') {
+      const currentBgVar = templateSlide.variables?.backgroundImage?.src;
+      const isCustomCmsBinding = !!(
+        currentBgVar
+        && isFieldVariable(currentBgVar)
+        && currentBgVar.data.field_id
+        && !isVirtualAssetField(currentBgVar.data.field_id)
+      );
+
+      // Virtual asset field values live in per-iteration item data only,
+      // so always use source='collection' for the binding.
+      const nextBackgroundImage = isCustomCmsBinding
+        ? templateSlide.variables?.backgroundImage
+        : {
+          src: {
+            type: 'field' as const,
+            data: {
+              field_id: MULTI_ASSET_VIRTUAL_FIELDS.URL,
+              relationships: [],
+              field_type: 'image' as const,
+              source: 'collection' as const,
+              collection_layer_id: templateSlide.id,
+            },
+          } satisfies FieldVariable,
+        };
+
+      const updatedTemplateSlide: Layer = {
+        ...templateSlide,
+        variables: {
+          ...templateSlide.variables,
+          collection: {
+            ...(templateSlide.variables?.collection ?? {}),
+            id: MULTI_ASSET_COLLECTION_ID,
+            source_field_type: 'multi_asset',
+          },
+          backgroundImage: nextBackgroundImage,
+        },
+      };
+
+      // Clear any stale collection data from a previously-bound real collection
+      clearLayerData(templateSlide.id);
+
+      // If extras exist, atomically replace the slides children with just the
+      // updated template — collapsing extras and applying the binding in one update.
+      if ((slidesLayer.children?.length ?? 0) > 1) {
+        onLayerUpdate(slidesLayer.id, { children: [updatedTemplateSlide] });
+      } else {
+        onLayerUpdate(templateSlide.id, { variables: updatedTemplateSlide.variables });
+      }
+    } else {
+      const nextVars = { ...templateSlide.variables };
+      delete nextVars.collection;
+      const bgSrc = nextVars.backgroundImage?.src;
+      if (bgSrc && isFieldVariable(bgSrc) && bgSrc.data.field_id && isVirtualAssetField(bgSrc.data.field_id)) {
+        delete nextVars.backgroundImage;
+      }
+      onLayerUpdate(templateSlide.id, {
+        variables: Object.keys(nextVars).length > 0 ? nextVars : undefined,
+      });
+
+      // Clear stale collection data and snap count so pagination dots reset
+      clearLayerData(templateSlide.id);
+      if (sliderLayer) {
+        setSliderSnapCount(sliderLayer.id, 0);
+      }
+    }
+  }, [slidesLayer, templateSlide, onLayerUpdate, sliderLayer, clearLayerData, setSliderSnapCount]);
 
   // Guard: only render for slider-family layers
   if (!layer || !sliderLayer) return null;
   if (!isSliderLayerName(layer.name)) return null;
+
+  // Content panel (Source select) only appears on the root slider — keeps the
+  // intermediate `slides` wrapper clean and routes per-slide CMS binding to the
+  // standard CMS section in the right sidebar.
+  const showContentPanel = layer.name === 'slider';
+  const sourceValue: SliderSource = isCmsSource ? 'cms' : 'static';
 
   const settings: SliderSettingsType = {
     ...DEFAULT_SLIDER_SETTINGS,
@@ -116,21 +237,54 @@ export default function SliderSettings({ layer, onLayerUpdate, allLayers }: Slid
   };
 
   return (
-    <SettingsPanel
-      title="Slider"
-      isOpen={isOpen}
-      onToggle={() => setIsOpen(!isOpen)}
-      action={
-        <div className="flex items-center gap-1">
-          <Button
-            variant="secondary"
-            size="xs"
-            className="size-6 p-0"
-            onClick={handleAddSlide}
-            aria-label="Add slide"
-          >
-            <Icon name="plus" className="size-2.5" />
-          </Button>
+    <>
+      {showContentPanel && (
+        <SettingsPanel
+          title="Content"
+          isOpen={isContentOpen}
+          onToggle={() => setIsContentOpen(!isContentOpen)}
+        >
+          <div className="grid grid-cols-3 items-center">
+            <Label variant="muted">Source</Label>
+            <div className="col-span-2">
+              <Select
+                value={sourceValue}
+                onValueChange={(v) => handleSourceChange(v as SliderSource)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="static">
+                    <Icon name="slides" className="size-3" /> Slides
+                  </SelectItem>
+                  <SelectItem value="cms" disabled={!hasMultiImageFields}>
+                    <Icon name="database" className="size-3" /> CMS
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </SettingsPanel>
+      )}
+
+      <SettingsPanel
+        title="Slider"
+        isOpen={isOpen}
+        onToggle={() => setIsOpen(!isOpen)}
+        action={
+          <div className="flex items-center gap-1">
+            {!isCmsSource && (
+              <Button
+                variant="secondary"
+                size="xs"
+                className="size-6 p-0"
+                onClick={handleAddSlide}
+                aria-label="Add slide"
+              >
+                <Icon name="plus" className="size-2.5" />
+              </Button>
+            )}
           <Button
             variant="secondary"
             size="xs"
@@ -151,7 +305,7 @@ export default function SliderSettings({ layer, onLayerUpdate, allLayers }: Slid
           </Button>
         </div>
       }
-    >
+      >
       <div className="flex flex-col gap-2.5">
         {/* Animation */}
         <div className="grid grid-cols-3 items-center">
@@ -525,6 +679,7 @@ export default function SliderSettings({ layer, onLayerUpdate, allLayers }: Slid
           </div>
         </div>
       </div>
-    </SettingsPanel>
+      </SettingsPanel>
+    </>
   );
 }

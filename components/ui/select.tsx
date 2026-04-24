@@ -196,7 +196,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "focus:bg-accent focus:text-accent-foreground text-muted-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-xs outline-hidden select-none overflow-hidden data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        "focus:bg-accent focus:text-accent-foreground text-muted-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-xs outline-hidden select-none overflow-hidden data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
@@ -206,8 +206,15 @@ function SelectItem({
           <Icon name="check" className="size-3 opacity-50" />
         </SelectPrimitive.ItemIndicator>
       </span>
+      {/*
+        Render ItemText as a flex span so icon + label sit on the same line.
+        Without this, Tailwind preflight forces the icon to display:block and it
+        wraps onto its own line inside Radix's default inline ItemText wrapper.
+      */}
       <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:whitespace-nowrap">
-        <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+        <SelectPrimitive.ItemText asChild>
+          <span className="flex items-center gap-2">{children}</span>
+        </SelectPrimitive.ItemText>
       </span>
     </SelectPrimitive.Item>
   )
