@@ -67,7 +67,7 @@ export const apps: AppDefinition[] = [
   },
   {
     id: 'webflow',
-    name: 'Webflow',
+    name: 'Webflow CMS',
     description: 'One-click migrate a Webflow CMS site into Ycode collections, including assets and references.',
     logo: webflowLogo,
     categories: ['popular', 'cms-data'],

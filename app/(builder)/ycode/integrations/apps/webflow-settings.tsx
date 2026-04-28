@@ -319,8 +319,8 @@ export default function WebflowSettings({
     return (
       <>
         <SheetHeader>
-          <SheetTitle>Webflow</SheetTitle>
-          <SheetDescription className="sr-only">Webflow integration settings</SheetDescription>
+          <SheetTitle>Webflow CMS</SheetTitle>
+          <SheetDescription className="sr-only">Webflow CMS integration settings</SheetDescription>
         </SheetHeader>
         <div className="flex items-center justify-center py-12">
           <Spinner />
@@ -332,7 +332,7 @@ export default function WebflowSettings({
   return (
     <>
       <SheetHeader>
-        <SheetTitle className="mr-auto">Webflow</SheetTitle>
+        <SheetTitle className="mr-auto">Webflow CMS</SheetTitle>
         {isConnected && (
           <Button
             variant="secondary"
