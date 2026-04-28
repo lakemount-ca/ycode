@@ -694,18 +694,14 @@ export function getRichTextSublayers(layer: Layer, cmsContent?: any): RichTextSu
   const layerDoc = (textVar.data as any)?.content;
   if (!layerDoc?.content || !Array.isArray(layerDoc.content)) return [];
 
-  // When content is bound to a CMS field, use the resolved CMS content for sublayers
+  // CMS-bound: show all possible element types since content is dynamic
   const binding = getCmsFieldBinding(layerDoc);
   if (binding) {
-    let resolvedDoc = cmsContent;
-    if (typeof resolvedDoc === 'string') {
-      try { resolvedDoc = JSON.parse(resolvedDoc); } catch { resolvedDoc = null; }
-    }
-    if (!resolvedDoc?.content || !Array.isArray(resolvedDoc.content)) return [];
-    return buildSublayersFromDoc(resolvedDoc, layer);
+    return buildAllStyleSublayers(layer);
   }
 
-  return buildSublayersFromDoc(layerDoc, layer);
+  // Non-CMS: show unique element types only (styling one applies to all of same type)
+  return buildUniqueStyleSublayersFromDoc(layerDoc, layer);
 }
 
 /** Build sublayer metadata from a Tiptap document's content blocks. */
@@ -809,6 +805,122 @@ function buildSublayersFromDoc(doc: any, layer: Layer): RichTextSublayer[] {
     });
 }
 
+/**
+ * Build a flat list of unique element types found in a Tiptap doc.
+ * Used for non-CMS-bound rich text where styling one element styles all of the same type.
+ */
+function buildUniqueStyleSublayersFromDoc(doc: any, layer: Layer): RichTextSublayer[] {
+  const seenStyleKeys = new Set<string>();
+  const sublayers: RichTextSublayer[] = [];
+
+  const allStyles = { ...DEFAULT_TEXT_STYLES, ...layer.textStyles };
+
+  function collectBlockTypes(blocks: any[]) {
+    for (const block of blocks) {
+      const styleKey = contentBlockToStyleKey(block);
+      if (styleKey && !seenStyleKeys.has(styleKey)) {
+        seenStyleKeys.add(styleKey);
+        sublayers.push({
+          type: block.type,
+          label: allStyles[styleKey]?.label || styleKey,
+          icon: STYLE_SUBLAYER_ICON_MAP[styleKey] || SUBLAYER_ICON_MAP[block.type] || 'box',
+          kind: 'style' as const,
+          styleKey,
+        });
+      }
+
+      // For lists, add listItem as a unique style target
+      const isList = block.type === 'bulletList' || block.type === 'orderedList';
+      if (isList && !seenStyleKeys.has('listItem') && block.content?.some((c: any) => c.type === 'listItem')) {
+        seenStyleKeys.add('listItem');
+        sublayers.push({
+          type: 'listItem',
+          label: allStyles.listItem?.label || 'List Item',
+          icon: STYLE_SUBLAYER_ICON_MAP.listItem || 'text',
+          kind: 'style' as const,
+          styleKey: 'listItem',
+        });
+      }
+
+      // For tables, add tableRow / tableHeader / tableCell as unique style targets
+      if (block.type === 'table' && Array.isArray(block.content)) {
+        for (const row of block.content) {
+          if (row.type !== 'tableRow') continue;
+          if (!seenStyleKeys.has('tableRow')) {
+            seenStyleKeys.add('tableRow');
+            sublayers.push({
+              type: 'tableRow',
+              label: allStyles.tableRow?.label || 'Table Row',
+              icon: 'table-row',
+              kind: 'style' as const,
+              styleKey: 'tableRow',
+            });
+          }
+          if (!Array.isArray(row.content)) continue;
+          for (const cell of row.content) {
+            const cellKey = cell.type === 'tableHeader' ? 'tableHeader' : 'tableCell';
+            if (!seenStyleKeys.has(cellKey)) {
+              seenStyleKeys.add(cellKey);
+              sublayers.push({
+                type: cell.type,
+                label: allStyles[cellKey]?.label || cellKey,
+                icon: 'table-cell',
+                kind: 'style' as const,
+                styleKey: cellKey,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  collectBlockTypes(doc.content.filter((b: any) => b.type !== 'paragraph' || b.content?.length));
+
+  // Collect unique inline marks across all blocks
+  const allMarks = extractInlineMarks(doc);
+  INLINE_STYLE_KEYS
+    .filter(k => allMarks.includes(k))
+    .forEach(markType => {
+      sublayers.push({
+        type: markType,
+        label: allStyles[markType]?.label || markType,
+        icon: STYLE_SUBLAYER_ICON_MAP[markType] || 'type',
+        kind: 'style' as const,
+        styleKey: markType,
+      });
+    });
+
+  return sublayers.sort((a, b) => {
+    const ia = SUBLAYER_SORT_ORDER.indexOf(a.styleKey!);
+    const ib = SUBLAYER_SORT_ORDER.indexOf(b.styleKey!);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+}
+
+/** Build the full list of stylable element types for CMS-bound rich text. */
+function buildAllStyleSublayers(layer: Layer): RichTextSublayer[] {
+  const allStyles = { ...DEFAULT_TEXT_STYLES, ...layer.textStyles };
+
+  return SUBLAYER_SORT_ORDER.map(styleKey => ({
+    type: styleKey,
+    label: allStyles[styleKey]?.label || styleKey,
+    icon: STYLE_SUBLAYER_ICON_MAP[styleKey] || SUBLAYER_ICON_MAP[styleKey] || 'box',
+    kind: 'style' as const,
+    styleKey,
+  }));
+}
+
+const SUBLAYER_SORT_ORDER = [
+  'paragraph', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'link',
+  'bold', 'italic', 'underline', 'strike', 'superscript', 'subscript',
+  'bulletList', 'orderedList', 'listItem',
+  'blockquote',
+  'table', 'tableRow', 'tableHeader', 'tableCell',
+  'richTextImage', 'horizontalRule',
+];
+
 const STYLE_SUBLAYER_ICON_MAP: Record<string, string> = {
   paragraph: 'paragraph',
   h1: 'heading',
@@ -821,6 +933,8 @@ const STYLE_SUBLAYER_ICON_MAP: Record<string, string> = {
   italic: 'italic',
   underline: 'underline',
   strike: 'strikethrough',
+  superscript: 'superscript',
+  subscript: 'subscript',
   link: 'link',
   bulletList: 'listUnordered',
   orderedList: 'listOrdered',
@@ -835,7 +949,7 @@ const STYLE_SUBLAYER_ICON_MAP: Record<string, string> = {
 };
 
 /** Inline mark style keys shown for all text layers */
-const INLINE_STYLE_KEYS = ['bold', 'italic', 'underline', 'strike', 'link'];
+const INLINE_STYLE_KEYS = ['bold', 'italic', 'underline', 'strike', 'superscript', 'subscript', 'link'];
 
 /**
  * Get text style sublayers for a layer.

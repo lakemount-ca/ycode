@@ -1808,8 +1808,10 @@ export default function LayersTree({
         n => n.sublayer && n.sublayer.kind === 'content' && n.parentId === selectedLayerId && n.index === storeActiveSublayerIndex
       );
       activeSublayerNodeId = contentMatch?.id ?? null;
-    } else if (hasStyleSublayerActive) {
-      // Direct style sublayers (text/heading) or nested mark sublayers
+    }
+
+    // Fall through to style matching when no content sublayer matched (non-CMS rich text)
+    if (!activeSublayerNodeId && hasStyleSublayerActive) {
       activeSublayerNodeId = flattenedNodes.find(
         n => n.sublayer && n.sublayer.kind === 'style' && n.sublayer.styleKey === storeActiveTextStyleKey && n.layer.id === selectedLayerId
       )?.id ?? null;
