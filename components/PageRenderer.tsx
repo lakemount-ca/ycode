@@ -91,6 +91,58 @@ function extractCollectionItemSlugs(layers: Layer[]): Record<string, string> {
   return slugs;
 }
 
+/**
+ * Strip heavy SSR-only data from the layer tree before passing to client
+ * components. After resolveCollectionLayers, all variables are pre-resolved
+ * into the layers — _collectionItemValues and _layerDataMap are redundant
+ * and can be enormous (e.g. 50 articles × full rich text bodies).
+ *
+ * The RSC Flight payload serializes everything passed to 'use client'
+ * components, so stripping here avoids doubling the response size.
+ */
+function stripSSROnlyData(layers: Layer[]): Layer[] {
+  return layers.map(layer => {
+    const stripped: Layer = { ...layer };
+
+    delete stripped._collectionItemValues;
+    delete stripped._collectionItemSlug;
+    delete stripped._layerDataMap;
+
+    if (stripped._filterConfig?.layerTemplate) {
+      stripped._filterConfig = {
+        ...stripped._filterConfig,
+        layerTemplate: stripSSROnlyData(stripped._filterConfig.layerTemplate),
+      };
+    }
+
+    if (stripped._paginationMeta?.layerTemplate) {
+      stripped._paginationMeta = {
+        ...stripped._paginationMeta,
+        layerTemplate: stripSSROnlyData(stripped._paginationMeta.layerTemplate),
+      };
+    }
+
+    if (stripped.children) {
+      stripped.children = stripSSROnlyData(stripped.children);
+    }
+
+    return stripped;
+  });
+}
+
+/** Extract minimal animation data from the layer tree for AnimationInitializer */
+function extractAnimationLayers(layers: Layer[]): Layer[] {
+  return layers
+    .filter(layer => layer.interactions?.length || layer.children?.length)
+    .map(layer => ({
+      id: layer.id,
+      name: layer.name,
+      classes: '',
+      interactions: layer.interactions,
+      children: layer.children ? extractAnimationLayers(layer.children) : undefined,
+    }));
+}
+
 /** Recursively check if any layer in the tree is a slider */
 function hasSliderLayers(layers: Layer[]): boolean {
   for (const layer of layers) {
@@ -300,11 +352,17 @@ export default async function PageRenderer({
     ? resolveCustomCodePlaceholders(rawPageCustomCodeBody, collectionItem, collectionFields)
     : rawPageCustomCodeBody;
 
-  const { bodyClasses, childLayers } = extractBodyLayer(resolvedLayers);
-  const hasLayers = childLayers.length > 0;
+  const { bodyClasses, childLayers: rawChildLayers } = extractBodyLayer(resolvedLayers);
+  const hasLayers = rawChildLayers.length > 0;
 
   // Generate CSS for initial animation states to prevent flickering
   const { css: initialAnimationCSS, hiddenLayerInfo } = generateInitialAnimationCSS(resolvedLayers);
+
+  // Strip heavy SSR-only data before crossing the client component boundary.
+  // On published pages, all variables are pre-resolved so _collectionItemValues
+  // and _layerDataMap are redundant — removing them can cut the payload by 10x+.
+  const childLayers = usePublishedData ? stripSSROnlyData(rawChildLayers) : rawChildLayers;
+  const animationLayers = usePublishedData ? extractAnimationLayers(resolvedLayers) : resolvedLayers;
 
   // Load installed fonts and generate CSS + link URLs
   let fontsCss = '';
@@ -500,7 +558,7 @@ export default async function PageRenderer({
       </main>
 
       {/* Initialize GSAP animations based on layer interactions */}
-      <AnimationInitializer layers={resolvedLayers} />
+      <AnimationInitializer layers={animationLayers} />
 
       {/* Initialize Swiper on slider elements */}
       {hasSliderLayers(resolvedLayers) && <SliderInitializer />}
