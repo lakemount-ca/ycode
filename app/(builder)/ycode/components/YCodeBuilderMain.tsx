@@ -1031,13 +1031,11 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
       // Only sync across pages and broadcast when the user actually edited
       // the component during this editing session.
       if (wasDirty) {
-        const updatedComponent = getComponentById(editingComponentId);
-        if (updatedComponent) {
-          updateComponentOnLayers(editingComponentId, updatedComponent.layers);
+        updateComponentOnLayers(editingComponentId);
 
-          if (liveComponentUpdates) {
-            liveComponentUpdates.broadcastComponentLayersUpdate(editingComponentId, updatedComponent.layers);
-          }
+        const updatedComponent = getComponentById(editingComponentId);
+        if (updatedComponent && liveComponentUpdates) {
+          liveComponentUpdates.broadcastComponentLayersUpdate(editingComponentId, updatedComponent.layers);
         }
       }
 

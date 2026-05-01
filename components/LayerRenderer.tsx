@@ -2774,6 +2774,11 @@ const LayerItem: React.FC<{
       );
     }
 
+    // Resolved parent-component context to pass to child LayerRenderers.
+    // Innermost component wins so double-click-to-edit targets the correct component.
+    const childParentComponentLayerId = layer.componentId ? layer.id : parentComponentLayerId;
+    const childParentComponentId = layer.componentId || parentComponentId;
+
     // Collection layers - repeat the element for each item (design applies to each looped item)
     if (isCollectionLayer && isEditMode) {
       if (isLoadingLayerData) {
@@ -2922,8 +2927,8 @@ const LayerItem: React.FC<{
                     currentLocale={currentLocale}
                     availableLocales={availableLocales}
                     liveLayerUpdates={liveLayerUpdates}
-                    parentComponentLayerId={parentComponentLayerId || (layer.componentId ? layer.id : undefined)}
-                    parentComponentId={parentComponentId || layer.componentId}
+                    parentComponentLayerId={childParentComponentLayerId}
+                    parentComponentId={childParentComponentId}
                     parentComponentOverrides={parentComponentOverrides}
                     parentComponentVariables={parentComponentVariables}
                     editingComponentVariables={editingComponentVariables}
@@ -3000,8 +3005,8 @@ const LayerItem: React.FC<{
               availableLocales={availableLocales}
               localeSelectorFormat={format}
               liveLayerUpdates={liveLayerUpdates}
-              parentComponentLayerId={layer.componentId ? layer.id : parentComponentLayerId}
-              parentComponentId={layer.componentId || parentComponentId}
+              parentComponentLayerId={childParentComponentLayerId}
+              parentComponentId={childParentComponentId}
               parentComponentOverrides={parentComponentOverrides}
               parentComponentVariables={parentComponentVariables}
               editingComponentVariables={editingComponentVariables}
@@ -3068,8 +3073,8 @@ const LayerItem: React.FC<{
             availableLocales={availableLocales}
             localeSelectorFormat={localeSelectorFormat}
             liveLayerUpdates={liveLayerUpdates}
-            parentComponentLayerId={parentComponentLayerId || (layer.componentId ? layer.id : undefined)}
-            parentComponentId={parentComponentId || layer.componentId}
+            parentComponentLayerId={childParentComponentLayerId}
+            parentComponentId={childParentComponentId}
             parentComponentOverrides={parentComponentOverrides}
             parentComponentVariables={parentComponentVariables}
             editingComponentVariables={editingComponentVariables}

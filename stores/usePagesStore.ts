@@ -23,13 +23,17 @@ import {
 import { generateId } from '../lib/utils';
 import { getDescendantFolderIds, isHomepage, findHomepage, findNextSelection } from '../lib/page-utils';
 import { updateLayersWithStyle, detachStyleFromLayers } from '../lib/layer-style-utils';
-import { updateLayersWithComponent, detachComponentFromLayers, containsComponent } from '../lib/component-utils';
+import { updateLayersWithComponent, detachComponentFromLayers } from '../lib/component-utils';
 import { useComponentsStore, triggerThumbnailGeneration } from './useComponentsStore';
 
 /**
  * Module-level dedupe map for in-flight loadDraft requests.
  * Kept outside the store so subscribers do not re-render when load
  * state changes, while still preventing duplicate HTTP fetches.
+ *
+ * NOTE: This map lives outside the Zustand store and will NOT be cleared
+ * by store resets (e.g. in tests or HMR). If a store reset/destroy helper
+ * is added, it must also call `inflightDraftLoads.clear()`.
  */
 const inflightDraftLoads = new Map<string, Promise<void>>();
 
@@ -100,7 +104,7 @@ interface PagesActions {
 
   // Component Actions
   createComponentFromLayer: (pageId: string, layerId: string, componentName: string) => Promise<string | null>;
-  updateComponentOnLayers: (componentId: string, newLayers: Layer[]) => void;
+  updateComponentOnLayers: (componentId: string) => void;
   detachComponentFromAllLayers: (componentId: string) => void;
 
   // CMS Binding Cleanup Actions
@@ -2912,7 +2916,7 @@ export const usePagesStore = create<PagesStore>((set, get) => ({
    * Update all layers using a specific component across all pages
    * Used when a component is updated
    */
-  updateComponentOnLayers: (componentId, newLayers) => {
+  updateComponentOnLayers: (componentId) => {
     const { draftsByPageId } = get();
 
     let mutated = false;
@@ -2920,10 +2924,7 @@ export const usePagesStore = create<PagesStore>((set, get) => ({
 
     Object.keys(draftsByPageId).forEach(pageId => {
       const draft = draftsByPageId[pageId];
-      if (!containsComponent(draft.layers, componentId)) {
-        return;
-      }
-      const nextLayers = updateLayersWithComponent(draft.layers, componentId, newLayers);
+      const nextLayers = updateLayersWithComponent(draft.layers, componentId);
       if (nextLayers !== draft.layers) {
         mutated = true;
         updatedDrafts[pageId] = { ...draft, layers: nextLayers };

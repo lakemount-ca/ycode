@@ -282,7 +282,6 @@ export function containsComponent(layers: Layer[], componentId: string): boolean
 export function updateLayersWithComponent(
   layers: Layer[],
   componentId: string,
-  newComponentLayers: Layer[]
 ): Layer[] {
   let changed = false;
   const result = layers.map(layer => {
@@ -292,7 +291,7 @@ export function updateLayersWithComponent(
     }
 
     if (layer.children && layer.children.length > 0) {
-      const newChildren = updateLayersWithComponent(layer.children, componentId, newComponentLayers);
+      const newChildren = updateLayersWithComponent(layer.children, componentId);
       if (newChildren !== layer.children) {
         changed = true;
         return { ...layer, children: newChildren };
